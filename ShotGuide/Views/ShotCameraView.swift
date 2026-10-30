@@ -362,8 +362,19 @@ struct ShotCameraView: View {
                 .ignoresSafeArea()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("\(shot.title) · \(takeLabel)")
-                        .font(.title2.weight(.bold))
+                    HStack(alignment: .top) {
+                        Text("\(shot.title) · \(takeLabel)")
+                            .font(.title2.weight(.bold))
+                        Spacer()
+                        Button {
+                            dismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.headline)
+                                .padding(10)
+                                .background(Color.white.opacity(0.12), in: Circle())
+                        }
+                    }
                     Text(plan.before)
                         .foregroundStyle(Color.white.opacity(0.8))
                     VStack(alignment: .leading, spacing: 10) {
