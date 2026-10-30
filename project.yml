@@ -1,0 +1,44 @@
+name: ShotGuide
+options:
+  bundleIdPrefix: com.jodyseescoolstuff
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  ShotGuide:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: ShotGuide
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Shot Guide
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSCameraUsageDescription: Shot Guide films each shot with the camera.
+        NSMicrophoneUsageDescription: Shot Guide records the sound with your clips.
+        NSLocationWhenInUseUsageDescription: Shot Guide saves where each trip and clip was filmed.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiresFullScreen: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jodyseescoolstuff.shotguide
+        PRODUCT_NAME: ShotGuide
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_STRICT_CONCURRENCY: minimal
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+    scheme: {}
