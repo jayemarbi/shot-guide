@@ -13,8 +13,8 @@ enum TagVocabulary {
         TagGroup(name: "Sky and light", tags: ["sunrise", "sunset", "golden hour", "blue hour", "night", "stars", "clouds", "fog", "storm", "rainbow", "aurora"]),
         TagGroup(name: "Wildlife", tags: ["wildlife", "whale", "dolphin", "bird", "kangaroo", "koala"]),
         TagGroup(name: "Activity", tags: ["hiking", "scrambling", "swimming", "surfing", "camping", "road trip", "boat", "flight"]),
-        TagGroup(name: "People", tags: ["me", "mates", "crowd", "empty"]),
-        TagGroup(name: "Mood", tags: ["calm", "epic", "playful", "cosy"]),
+        TagGroup(name: "People", tags: ["me", "couple", "mates", "crowd", "empty"]),
+        TagGroup(name: "Mood", tags: ["calm", "epic", "romantic", "playful", "cosy"]),
         TagGroup(name: "Places", tags: ["city", "lookout", "track"])
     ]
 

@@ -82,6 +82,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case wide = "WIDE"
     case walkaway = "WALKAWAY"
     case tele = "TELE"
+    case moment = "MOMENT"
     case detail = "DETAIL"
     case pov = "POV"
     case talk = "TALK"
@@ -104,7 +105,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
 
     var targetTakes: Int {
         switch self {
-        case .reveal, .wide, .walkaway, .transition, .bodyWipe, .whip: return 2
+        case .reveal, .wide, .walkaway, .moment, .transition, .bodyWipe, .whip: return 2
         case .detail, .talk: return 3
         default: return 1
         }
@@ -126,7 +127,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
 
     var defaultGroup: ShotGroup {
         switch self {
-        case .reaction, .timelapse, .walkaway, .tele, .talk, .secondAngle, .bodyWipe: return .inShot
+        case .reaction, .timelapse, .walkaway, .tele, .moment, .talk, .secondAngle, .bodyWipe: return .inShot
         default: return .inHand
         }
     }
@@ -156,6 +157,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .wide: return "The whole place and its scale"
         case .walkaway: return "You walk into the scene"
         case .tele: return "You, small, under something huge"
+        case .moment: return "A real moment together, filmed from the tripod"
         case .detail: return "Close-ups and textures"
         case .pov: return "What your eyes see on the way"
         case .talk: return "One line to camera"
@@ -280,6 +282,20 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 steps: [
                     GuideStep(start: 0, end: 10, text: "Stand still, facing the view."),
                     GuideStep(start: 10, end: 20, text: "Walk slowly across the frame.")
+                ])
+
+        case .moment:
+            return ShotPlan(
+                shot: self, take: take, group: .inShot,
+                lens: .wide, fps: 60, stabilisation: .off,
+                autoStop: 30, countdown: 10,
+                before: "Tripod, with the view behind you. It films at 60 fps so the moment can be slowed down a little. "
+                    + "For a mountain that looms bigger, set up further back and use the zoom lens. "
+                    + "Ideas: lie back in the flowers, a kiss in front of the view, a slow spin, walking hand in hand.",
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Get comfortable. Don't look at the camera."),
+                    GuideStep(start: 5, end: 25, text: "Have the moment. Keep it real and keep moving gently."),
+                    GuideStep(start: 25, end: 30, text: "Hold still in the last moment.")
                 ])
 
         case .detail:
