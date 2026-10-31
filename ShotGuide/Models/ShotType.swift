@@ -45,6 +45,15 @@ struct ZoomRamp: Hashable {
     let duration: Double
 }
 
+/// When a take starts and stops. Every shot has the same options, and the app remembers your choices for each shot.
+struct ShotTiming: Codable, Equatable {
+    /// Seconds to count down before recording starts. 0 starts straight away.
+    var countdown: Int
+    /// Stop after `length` seconds, or keep rolling until you stop it.
+    var stopsByItself: Bool
+    var length: Double
+}
+
 /// Everything the camera screen needs to film one take of one shot.
 struct ShotPlan {
     var shot: ShotType
@@ -54,7 +63,10 @@ struct ShotPlan {
     var fps: Int = 30
     var stabilisation: Stabilisation = .standard
     var timelapseInterval: Double? = nil
+    /// Where the timeline ends, for shots that stop by themselves unless you change it.
     var autoStop: Double? = nil
+    /// A sensible length if you switch a you-stop-it shot to stop by itself.
+    var manualLength: Double = 30
     var countdown: Int = 5
     var zoomRamp: ZoomRamp? = nil
     var before: String = ""
@@ -66,16 +78,37 @@ struct ShotPlan {
     var captureConfig: CaptureConfig {
         CaptureConfig(lens: lens, fps: fps, stabilisation: stabilisation, timelapseInterval: timelapseInterval)
     }
+
+    /// Phone-in-hand shots start straight away; shots you're in count you in.
+    var defaultTiming: ShotTiming {
+        ShotTiming(countdown: isInShot ? countdown : 0, stopsByItself: autoStop != nil, length: autoStop ?? manualLength)
+    }
+
+    /// The timeline fitted to how the take ends: the last step runs to the chosen length,
+    /// or stays open when you stop it yourself. Steps after a shorter length are dropped.
+    func timeline(endingAt end: Double?) -> [GuideStep] {
+        guard let end else {
+            guard let last = steps.last else { return steps }
+            return Array(steps.dropLast()) + [GuideStep(start: last.start, end: nil, text: last.text)]
+        }
+        var kept = steps.filter { $0.start < end }
+        if let last = kept.last {
+            kept[kept.count - 1] = GuideStep(start: last.start, end: end, text: last.text)
+        }
+        return kept
+    }
 }
 
 /// Where a shot sits on the trip page.
 enum ShotSection {
+    case onTheWay
     case doFirst
     case anyOrder
     case transitions
 }
 
 enum ShotType: String, CaseIterable, Codable, Identifiable {
+    case onTheWay = "ONTHEWAY"
     case reaction = "REACTION"
     case reveal = "REVEAL"
     case timelapse = "TIMELAPSE"
@@ -83,7 +116,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case walkaway = "WALKAWAY"
     case tele = "TELE"
     case moment = "MOMENT"
+    case follow = "FOLLOW"
     case detail = "DETAIL"
+    case food = "FOOD"
     case pov = "POV"
     case talk = "TALK"
     case ambient = "AMBIENT"
@@ -99,14 +134,15 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .secondAngle: return "SECOND ANGLE"
         case .bodyWipe: return "BODY WIPE"
+        case .onTheWay: return "ON THE WAY"
         default: return rawValue
         }
     }
 
     var targetTakes: Int {
         switch self {
-        case .reveal, .wide, .walkaway, .moment, .transition, .bodyWipe, .whip: return 2
-        case .detail, .talk: return 3
+        case .reveal, .wide, .walkaway, .moment, .follow, .food, .transition, .bodyWipe, .whip: return 2
+        case .detail, .talk, .onTheWay: return 3
         default: return 1
         }
     }
@@ -117,13 +153,20 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     var section: ShotSection {
         if doFirst { return .doFirst }
         switch self {
+        case .onTheWay: return .onTheWay
         case .transition, .bodyWipe, .whip: return .transitions
         default: return .anyOrder
         }
     }
 
-    /// BODY WIPE and WHIP are extras, so they don't count towards a trip's total.
-    var countsTowardTotal: Bool { self != .bodyWipe && self != .whip }
+    /// Extras depend on the day (a partner to follow, food, an interesting trip there), so they
+    /// don't count towards a trip's total.
+    var countsTowardTotal: Bool {
+        switch self {
+        case .bodyWipe, .whip, .follow, .food, .onTheWay: return false
+        default: return true
+        }
+    }
 
     var defaultGroup: ShotGroup {
         switch self {
@@ -158,6 +201,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .walkaway: return "You walk into the scene"
         case .tele: return "You, small, under something huge"
         case .moment: return "A real moment together, filmed from the tripod"
+        case .follow: return "Being led by the hand towards the view"
+        case .onTheWay: return "The trip there: windows, roads, boats"
+        case .food: return "Local food, close and slow"
         case .detail: return "Close-ups and textures"
         case .pov: return "What your eyes see on the way"
         case .talk: return "One line to camera"
@@ -179,7 +225,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .front, fps: 30, stabilisation: .standard,
-                autoStop: nil, countdown: 3,
+                autoStop: nil, manualLength: 40, countdown: 3,
                 before: "Front camera at arm's length. Start before you can see the view.",
                 steps: [
                     GuideStep(start: 0, end: 10, text: "Walk up. Don't look at the view yet."),
@@ -219,7 +265,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .ultraWide, fps: 30, stabilisation: .off,
-                timelapseInterval: 1, autoStop: nil, countdown: 5,
+                timelapseInterval: 1, autoStop: nil, manualLength: 600, countdown: 5,
                 before: "Tripod on solid ground. If the light is steady, hold on the screen to lock exposure.",
                 steps: [
                     GuideStep(start: 0, end: nil, text: "Leave it running. 10 minutes makes 20 seconds of video.")
@@ -298,6 +344,44 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 25, end: 30, text: "Hold still in the last moment.")
                 ])
 
+        case .follow:
+            return ShotPlan(
+                shot: self, take: take, group: .inHand,
+                lens: .wide, fps: 30, stabilisation: .strongest,
+                autoStop: 15,
+                before: "Your partner holds your hand and leads you towards the view. "
+                    + "Film from your other hand, with their hand and the view in frame.",
+                steps: [
+                    GuideStep(start: 0, end: 2, text: "Their hand in yours, reaching back towards the lens."),
+                    GuideStep(start: 2, end: 12, text: "Let them lead you. Keep your arm and the phone steady."),
+                    GuideStep(start: 12, end: 15, text: "Slow down as the view opens up.")
+                ])
+
+        case .onTheWay:
+            return ShotPlan(
+                shot: self, take: take, group: .inHand,
+                lens: .wide, fps: 30, stabilisation: .strongest,
+                autoStop: 10,
+                before: "The trip there: a plane window, the road ahead, a boat's wake, your bag going on. "
+                    + "At a window, hold the phone close to the glass to cut reflections.",
+                steps: [
+                    GuideStep(start: 0, end: 2, text: "Frame it and hold steady."),
+                    GuideStep(start: 2, end: 8, text: "Let the movement do the work. Keep the phone still."),
+                    GuideStep(start: 8, end: 10, text: "Hold.")
+                ])
+
+        case .food:
+            return ShotPlan(
+                shot: self, take: take, group: .inHand,
+                lens: .wide, fps: 30, stabilisation: .cinematic,
+                autoStop: 8,
+                before: "Get close and tap the food to focus. Window light or outdoors looks best.",
+                steps: [
+                    GuideStep(start: 0, end: 2, text: "Start close on the food."),
+                    GuideStep(start: 2, end: 6, text: "Slide slowly across it, or catch the first bite or pour."),
+                    GuideStep(start: 6, end: 8, text: "Hold.")
+                ])
+
         case .detail:
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
@@ -326,7 +410,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .wide, fps: 30, stabilisation: .off,
-                autoStop: nil, countdown: 5,
+                autoStop: nil, manualLength: 20, countdown: 5,
                 before: "Tripod at eye level, mic clipped on. Do three takes.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Look at the lens and smile."),
@@ -398,7 +482,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .ultraWide, fps: 30, stabilisation: .off,
-                autoStop: nil, countdown: 5,
+                autoStop: nil, manualLength: 60, countdown: 5,
                 before: "Mini tripod. This phone films you getting the hero shot on your other camera.",
                 steps: [
                     GuideStep(start: 0, end: 5, text: "Walk in with your gear."),

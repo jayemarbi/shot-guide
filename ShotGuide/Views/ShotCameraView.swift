@@ -17,7 +17,8 @@ struct ShotCameraView: View {
     @State private var variant = 0
     @State private var take = 1
     @State private var showBriefing: Bool
-    @State private var countdownLength = 5
+    @State private var timing = ShotTiming(countdown: 5, stopsByItself: true, length: 10)
+    @State private var showTiming = false
     @State private var countdownRemaining: Int? = nil
     @State private var countdownTask: Task<Void, Never>? = nil
     @State private var cameraAllowed = false
@@ -47,15 +48,32 @@ struct ShotCameraView: View {
         take > shot.targetTakes ? "extra take \(take)" : "take \(take) of \(shot.targetTakes)"
     }
 
-    private var countdownChoices: [Int] {
-        Array(Set([3, 5, 10, 30, 45, plan.countdown])).sorted()
+    /// Changes to timing are remembered for this shot.
+    private var timingBinding: Binding<ShotTiming> {
+        Binding(
+            get: { timing },
+            set: { newValue in
+                timing = newValue
+                TimingStore.save(newValue, shot: shot, inShot: plan.isInShot)
+            })
+    }
+
+    /// The timeline fitted to how this take will end.
+    private var displaySteps: [GuideStep] {
+        plan.timeline(endingAt: timing.stopsByItself ? timing.length : nil)
     }
 
     private var startHint: String {
-        if plan.lens == .front {
-            return "Start with the red button or a volume button."
+        let buttons = plan.lens == .front
+            ? "Start with the red button or a volume button."
+            : "Start with the red button, a volume button or your Bluetooth remote."
+        if timing.countdown == 0 {
+            return buttons + " Recording starts straight away."
         }
-        return "Start with the red button, a volume button or your Bluetooth remote. The flash blinks for the last 3 seconds before recording starts."
+        if plan.lens == .front {
+            return buttons
+        }
+        return buttons + " The flash blinks for the last 3 seconds before recording starts."
     }
 
     var body: some View {
@@ -236,7 +254,7 @@ struct ShotCameraView: View {
 
     @ViewBuilder
     private var promptCard: some View {
-        let steps = plan.steps
+        let steps = displaySteps
         let now = camera.elapsed
         if let index = steps.lastIndex(where: { now >= $0.start }) {
             let step = steps[index]
@@ -297,7 +315,9 @@ struct ShotCameraView: View {
                     Circle()
                         .fill(Color.red)
                         .frame(width: 10, height: 10)
-                    Text(clockString(camera.elapsed))
+                    Text(timing.stopsByItself
+                         ? "\(clockString(camera.elapsed)) / \(clockString(timing.length))"
+                         : clockString(camera.elapsed))
                         .font(.headline.monospacedDigit())
                 }
                 .padding(.horizontal, 12)
@@ -326,12 +346,49 @@ struct ShotCameraView: View {
                 recordButton
                 Spacer()
 
-                Color.clear.frame(width: 120, height: 44)
+                Group {
+                    if !isBusy {
+                        Button {
+                            showTiming = true
+                        } label: {
+                            let summary = TimingControls.summary(timing)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label(summary.countdown, systemImage: "timer")
+                                Text(summary.ending)
+                                    .foregroundStyle(Color.white.opacity(0.8))
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(width: 120, height: 44)
             }
         }
         .foregroundStyle(Color.white)
         .padding(.horizontal)
         .padding(.bottom, 24)
+        .sheet(isPresented: $showTiming) {
+            NavigationStack {
+                Form {
+                    TimingControls(timing: timingBinding)
+                }
+                .navigationTitle("\(shot.title) timing")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showTiming = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
     }
 
     private var recordButton: some View {
@@ -386,7 +443,7 @@ struct ShotCameraView: View {
                     Text(plan.before)
                         .foregroundStyle(Color.white.opacity(0.8))
                     VStack(alignment: .leading, spacing: 10) {
-                        ForEach(plan.steps, id: \.self) { step in
+                        ForEach(displaySteps, id: \.self) { step in
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Text(step.rangeLabel)
                                     .font(.subheadline.monospacedDigit().weight(.semibold))
@@ -400,16 +457,9 @@ struct ShotCameraView: View {
                         Toggle("I'm in this shot", isOn: $inShot)
                             .tint(.orange)
                     }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Countdown")
-                            .font(.subheadline.weight(.semibold))
-                        Picker("Countdown", selection: $countdownLength) {
-                            ForEach(countdownChoices, id: \.self) { seconds in
-                                Text("\(seconds) s").tag(seconds)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                    }
+                    TimingControls(timing: timingBinding)
+                        .padding(12)
+                        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                     Text(startHint)
                         .font(.footnote)
                         .foregroundStyle(Color.white.opacity(0.7))
@@ -477,7 +527,7 @@ struct ShotCameraView: View {
         location.start()
         take = store.nextTake(tripID: tripID, shot: shot)
         variant = shot.defaultVariant(forTake: take)
-        countdownLength = plan.countdown
+        timing = TimingStore.load(shot, plan: plan)
         showBriefing = plan.isInShot
         CameraController.requestAccess { allowed in
             if allowed {
@@ -499,7 +549,7 @@ struct ShotCameraView: View {
     }
 
     private func planChanged() {
-        countdownLength = plan.countdown
+        timing = TimingStore.load(shot, plan: plan)
         showBriefing = plan.isInShot
         if cameraAllowed {
             camera.configure(plan.captureConfig)
@@ -526,7 +576,8 @@ struct ShotCameraView: View {
         case .ready:
             guard reviewClip == nil, !permissionDenied else { return }
             message = nil
-            if plan.isInShot {
+            showBriefing = false
+            if timing.countdown > 0 {
                 startCountdown()
             } else {
                 beginRecording()
@@ -538,8 +589,9 @@ struct ShotCameraView: View {
 
     private func startCountdown() {
         showBriefing = false
-        let total = max(countdownLength, 1)
-        let useFlash = plan.lens != .front && camera.hasTorch
+        let total = max(timing.countdown, 1)
+        // The flash tells you when recording starts if you're in front of the phone.
+        let useFlash = plan.isInShot && plan.lens != .front && camera.hasTorch
         countdownTask?.cancel()
         countdownTask = Task { @MainActor in
             for remaining in stride(from: total, through: 1, by: -1) {
@@ -590,7 +642,7 @@ struct ShotCameraView: View {
             zoomStarted = true
             camera.rampZoom(fromDisplay: ramp.from, toDisplay: ramp.to, duration: ramp.duration)
         }
-        if let stopAt = plan.autoStop, value >= stopAt {
+        if timing.stopsByItself, value >= timing.length {
             camera.stopRecording()
         }
     }

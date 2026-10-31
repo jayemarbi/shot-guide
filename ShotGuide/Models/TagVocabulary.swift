@@ -12,10 +12,11 @@ enum TagVocabulary {
         TagGroup(name: "Land", tags: ["mountain", "summit", "ridge", "cliff", "canyon", "gorge", "cave", "valley", "forest", "rainforest", "desert", "rocks", "flowers", "snow"]),
         TagGroup(name: "Sky and light", tags: ["sunrise", "sunset", "golden hour", "blue hour", "night", "stars", "clouds", "fog", "storm", "rainbow", "aurora"]),
         TagGroup(name: "Wildlife", tags: ["wildlife", "whale", "dolphin", "bird", "kangaroo", "koala"]),
-        TagGroup(name: "Activity", tags: ["hiking", "scrambling", "swimming", "surfing", "camping", "road trip", "boat", "flight"]),
+        TagGroup(name: "Activity", tags: ["hiking", "scrambling", "swimming", "surfing", "camping", "road trip", "boat", "flight", "train"]),
         TagGroup(name: "People", tags: ["me", "couple", "mates", "crowd", "empty"]),
         TagGroup(name: "Mood", tags: ["calm", "epic", "romantic", "playful", "cosy"]),
-        TagGroup(name: "Places", tags: ["city", "lookout", "track"])
+        TagGroup(name: "Places", tags: ["city", "lookout", "track"]),
+        TagGroup(name: "Food", tags: ["food", "cafe", "market"])
     ]
 
     static var allStarterTags: [String] {
@@ -78,6 +79,14 @@ enum TagVocabulary {
         "car": "road trip",
         "cityscape": "city",
         "street": "city",
-        "building": "city"
+        "building": "city",
+        "airplane": "flight",
+        "aircraft": "flight",
+        "train": "train",
+        "food": "food",
+        "dessert": "food",
+        "baked_goods": "food",
+        "coffee": "cafe",
+        "market": "market"
     ]
 }

@@ -45,6 +45,12 @@ struct TripView: View {
                 }
             }
 
+            Section("On the way") {
+                ForEach(ShotType.allCases.filter { $0.section == .onTheWay }) { shot in
+                    shotRow(shot, trip: trip)
+                }
+            }
+
             Section("Do first") {
                 ForEach(ShotType.allCases.filter { $0.section == .doFirst }) { shot in
                     shotRow(shot, trip: trip)
@@ -65,7 +71,7 @@ struct TripView: View {
                 Text("Transitions")
             } footer: {
                 Text("Film the Out half as you leave a place and the In half at the next one, moving the same way in both. "
-                    + "BODY WIPE and WHIP are extras, so they don't count towards the total.")
+                    + "Shots marked extra are for when the day allows, so they don't count towards the total.")
             }
 
             if !trip.clips.isEmpty {
@@ -170,7 +176,7 @@ struct TripView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(shot.title)
                         .font(.headline)
-                    Text(shot.summary)
+                    Text(shot.countsTowardTotal ? shot.summary : shot.summary + " · extra")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

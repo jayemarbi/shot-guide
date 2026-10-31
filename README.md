@@ -1,6 +1,6 @@
 # Shot Guide
 
-An iPhone app for filming the jodyseescoolstuff shot list. Start a trip at a place, pick any of the 16 shots (including the BODY WIPE and WHIP transition extras), and the camera opens with that shot's settings. Phone-in-hand shots show live prompts while you record; shots with you in them show a timeline first, count you in with the flash, keep the screen clean and replay the take straight after.
+An iPhone app for filming the jodyseescoolstuff shot list. Start a trip at a place, pick any of the 19 shots (extras are marked), and the camera opens with that shot's settings. Every shot has a countdown (off up to 10 minutes) and either stops by itself after a length you choose or keeps rolling until you stop it; the app remembers your choices for each shot. Phone-in-hand shots show live prompts while you record; shots with you in them show a timeline first, count you in with the flash, keep the screen clean and replay the take straight after.
 
 Every clip is saved already named (`Place_YYYY-MM-DD_SHOT_##.mov`), filed under `Library/<continent>/<country>/<state>/<date> <place>/`, and listed in that trip's `catalog.csv` with its location, light, camera settings and tags.
 
