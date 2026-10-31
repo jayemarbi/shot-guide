@@ -2,6 +2,8 @@
 
 An iPhone app for filming the jodyseescoolstuff shot list. Start a trip at a place, pick any of the 19 shots (extras are marked), and the camera opens with that shot's settings. The trip page lists them in the order you'll film them: on the way, arriving (transition In halves), first look, at the spot (easiest first, the ones worth taking your time over last) and leaving (transition Out halves), with a line about when golden hour and sunset are. The camera has pinch to zoom (up to 20x; it resets after each take), a level line and a grid that can be switched off. Every shot has a countdown (off up to 10 minutes) and either stops by itself after a length you choose or keeps rolling until you stop it; the app remembers your choices for each shot. Phone-in-hand shots show live prompts while you record; shots with you in them show a timeline first, count you in with the flash, keep the screen clean and replay the take straight after.
 
+While recording, Mark (or volume down) saves the moment's time with the clip. Shots that stop by themselves keep rolling 2 extra seconds for the edit. Movement shots film at 60 fps, dropping to 30 once the sun is down. VOICEOVER records sound only, for narration. Each trip has Trip facts (distance, time, cost, tips; saved as `facts.txt`), Add from Photos for clips and photos from other cameras, and shows how many minutes of 4K fit in the space left. TALK, REACTION, SECOND ANGLE and VOICEOVER show which mic is recording.
+
 Every clip is saved already named (`Place_YYYY-MM-DD_SHOT_##.mov`), filed under `Library/<continent>/<country>/<state>/<date> <place>/`, and listed in that trip's `catalog.csv` with its location, light, camera settings and tags.
 
 ## How it's built
