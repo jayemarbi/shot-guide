@@ -99,14 +99,7 @@ struct ShotPlan {
     }
 }
 
-/// Where a shot sits on the trip page.
-enum ShotSection {
-    case onTheWay
-    case doFirst
-    case anyOrder
-    case transitions
-}
-
+/// The shots, in no particular order. TripPhase sets the order they appear in on the trip page.
 enum ShotType: String, CaseIterable, Codable, Identifiable {
     case onTheWay = "ONTHEWAY"
     case reaction = "REACTION"
@@ -147,17 +140,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// Worth getting in the first two minutes at a new place.
-    var doFirst: Bool { self == .reaction || self == .reveal || self == .timelapse }
-
-    var section: ShotSection {
-        if doFirst { return .doFirst }
-        switch self {
-        case .onTheWay: return .onTheWay
-        case .transition, .bodyWipe, .whip: return .transitions
-        default: return .anyOrder
-        }
-    }
+    /// Transitions come in two halves: Out ends a place, In starts the next.
+    var isTransition: Bool { self == .transition || self == .bodyWipe || self == .whip }
 
     /// Extras depend on the day (a partner to follow, food, an interesting trip there), so they
     /// don't count towards a trip's total.
@@ -188,7 +172,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
 
     /// Transitions alternate: odd takes are the Out half, even takes the In half.
     func defaultVariant(forTake take: Int) -> Int {
-        if section == .transitions { return take % 2 == 0 ? 1 : 0 }
+        if isTransition { return take % 2 == 0 ? 1 : 0 }
         return 0
     }
 

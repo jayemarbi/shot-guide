@@ -6,7 +6,8 @@ struct TripView: View {
     let tripID: UUID
 
     @EnvironmentObject var store: TripStore
-    @State private var activeShot: ShotType? = nil
+    @EnvironmentObject var location: LocationService
+    @State private var activeSlot: ShotSlot? = nil
     @State private var selectedClip: Clip? = nil
     @State private var exporting = false
     @State private var exportedFile: SharedFile? = nil
@@ -43,35 +44,29 @@ struct TripView: View {
                             .font(.subheadline)
                     }
                 }
-            }
-
-            Section("On the way") {
-                ForEach(ShotType.allCases.filter { $0.section == .onTheWay }) { shot in
-                    shotRow(shot, trip: trip)
+                // The light right now, so you know when to save the shots worth taking your time over.
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Label(lightLine(for: trip, at: context.date) ?? "Sunrise and sunset times show up once your location is found.",
+                          systemImage: "sun.horizon.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.orange)
+                }
+                if trip.clips.isEmpty {
+                    Label("Before your first shot, wipe your lens. A smudge softens every shot.", systemImage: "sparkles")
+                        .font(.subheadline)
                 }
             }
 
-            Section("Do first") {
-                ForEach(ShotType.allCases.filter { $0.section == .doFirst }) { shot in
-                    shotRow(shot, trip: trip)
+            ForEach(TripPhase.allCases) { phase in
+                Section {
+                    ForEach(phase.slots) { slot in
+                        slotRow(slot, trip: trip)
+                    }
+                } header: {
+                    Text(phase.title)
+                } footer: {
+                    Text(phase.footer)
                 }
-            }
-
-            Section("Any order") {
-                ForEach(ShotType.allCases.filter { $0.section == .anyOrder }) { shot in
-                    shotRow(shot, trip: trip)
-                }
-            }
-
-            Section {
-                ForEach(ShotType.allCases.filter { $0.section == .transitions }) { shot in
-                    shotRow(shot, trip: trip)
-                }
-            } header: {
-                Text("Transitions")
-            } footer: {
-                Text("Film the Out half as you leave a place and the In half at the next one, moving the same way in both. "
-                    + "Shots marked extra are for when the day allows, so they don't count towards the total.")
             }
 
             if !trip.clips.isEmpty {
@@ -131,8 +126,8 @@ struct TripView: View {
         } message: {
             Text(copiedMessage ?? "")
         }
-        .fullScreenCover(item: $activeShot) { shot in
-            ShotCameraView(tripID: tripID, shot: shot)
+        .fullScreenCover(item: $activeSlot) { slot in
+            ShotCameraView(tripID: tripID, shot: slot.shot, fixedVariant: slot.half)
         }
         .sheet(item: $selectedClip) { clip in
             ReviewView(tripID: tripID, clipID: clip.id, autoplay: false, preselectSuggestions: false, title: "Clip")
@@ -163,25 +158,34 @@ struct TripView: View {
         }
     }
 
-    private func shotRow(_ shot: ShotType, trip: Trip) -> some View {
-        let count = trip.takeCount(of: shot)
-        let done = count >= shot.targetTakes
+    /// "Golden hour starts at 5:41 pm, sunset at 6:12 pm", from where you are now (or where the trip started).
+    private func lightLine(for trip: Trip, at date: Date) -> String? {
+        let coordinate = location.location?.coordinate
+        guard let latitude = coordinate?.latitude ?? trip.latitude,
+              let longitude = coordinate?.longitude ?? trip.longitude else { return nil }
+        return SunCalc.lightLine(at: date, latitude: latitude, longitude: longitude)
+    }
+
+    private func slotRow(_ slot: ShotSlot, trip: Trip) -> some View {
+        let shot = slot.shot
+        let count = slot.takeCount(in: trip)
+        let done = count >= slot.target
         return Button {
-            activeShot = shot
+            activeSlot = slot
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: shot.defaultGroup == .inShot ? "person.fill" : "hand.raised.fill")
                     .frame(width: 28)
                     .foregroundStyle(Color.orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(shot.title)
+                    Text(slot.title)
                         .font(.headline)
-                    Text(shot.countsTowardTotal ? shot.summary : shot.summary + " · extra")
+                    Text(shot.countsTowardTotal ? slot.summary : slot.summary + " · extra")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(count)/\(shot.targetTakes)")
+                Text("\(count)/\(slot.target)")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(done ? Color.green : Color.secondary)
                 if done {

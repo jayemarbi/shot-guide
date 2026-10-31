@@ -56,11 +56,12 @@ struct Trip: Codable, Identifiable, Hashable {
         clips.filter { $0.shot == shot.rawValue }.count
     }
 
+    /// Counted row by row on the trip page, so a transition needs both its Out and In halves.
     var targetTotal: Int {
-        ShotType.allCases.filter { $0.countsTowardTotal }.reduce(0) { $0 + $1.targetTakes }
+        TripPhase.allSlots.filter { $0.shot.countsTowardTotal }.reduce(0) { $0 + $1.target }
     }
 
     var doneTotal: Int {
-        ShotType.allCases.filter { $0.countsTowardTotal }.reduce(0) { $0 + min(takeCount(of: $1), $1.targetTakes) }
+        TripPhase.allSlots.filter { $0.shot.countsTowardTotal }.reduce(0) { $0 + min($1.takeCount(in: self), $1.target) }
     }
 }

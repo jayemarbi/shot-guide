@@ -7,11 +7,15 @@ import UIKit
 struct ShotCameraView: View {
     let tripID: UUID
     let shot: ShotType
+    /// Opened from a transition's Out or In row: stick to that half for every take.
+    let fixedVariant: Int?
 
     @EnvironmentObject var store: TripStore
     @EnvironmentObject var location: LocationService
     @Environment(\.dismiss) private var dismiss
     @StateObject private var camera = CameraController()
+    @StateObject private var level = LevelMeter()
+    @AppStorage("showGrid") private var showGrid = true
 
     @State private var inShot: Bool
     @State private var variant = 0
@@ -29,11 +33,17 @@ struct ShotCameraView: View {
     @State private var message: String? = nil
     @State private var started = false
 
-    init(tripID: UUID, shot: ShotType) {
+    init(tripID: UUID, shot: ShotType, fixedVariant: Int? = nil) {
         self.tripID = tripID
         self.shot = shot
+        self.fixedVariant = fixedVariant
         _inShot = State(initialValue: shot.defaultGroup == .inShot)
         _showBriefing = State(initialValue: shot.defaultGroup == .inShot)
+    }
+
+    /// The version for the next take: the half you picked on the trip page, or the shot's usual pattern.
+    private func variantFor(take: Int) -> Int {
+        fixedVariant ?? shot.defaultVariant(forTake: take)
     }
 
     private var plan: ShotPlan {
@@ -45,7 +55,10 @@ struct ShotCameraView: View {
     }
 
     private var takeLabel: String {
-        take > shot.targetTakes ? "extra take \(take)" : "take \(take) of \(shot.targetTakes)"
+        if fixedVariant != nil, let half = plan.variantName {
+            return "\(half) half"
+        }
+        return take > shot.targetTakes ? "extra take \(take)" : "take \(take) of \(shot.targetTakes)"
     }
 
     /// Changes to timing are remembered for this shot.
@@ -105,6 +118,10 @@ struct ShotCameraView: View {
                     }
                 }
 
+            guides
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
             VStack(spacing: 0) {
                 topBar
                 Spacer()
@@ -146,6 +163,36 @@ struct ShotCameraView: View {
 
     // MARK: Pieces of the screen
 
+    /// A rule-of-thirds grid and a level line. They're only on the screen, never in the video.
+    private var guides: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+            ZStack {
+                if showGrid {
+                    Path { path in
+                        for third in [CGFloat(1) / 3, CGFloat(2) / 3] {
+                            path.move(to: CGPoint(x: width * third, y: 0))
+                            path.addLine(to: CGPoint(x: width * third, y: height))
+                            path.move(to: CGPoint(x: 0, y: height * third))
+                            path.addLine(to: CGPoint(x: width, y: height * third))
+                        }
+                    }
+                    .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
+                }
+                if let tilt = level.tilt, abs(tilt) < 20 {
+                    let isLevel = abs(tilt) < 1
+                    // The line stays parallel to the real horizon and turns yellow when the phone is level.
+                    Capsule()
+                        .fill(isLevel ? Color.yellow : Color.white.opacity(0.8))
+                        .frame(width: isLevel ? 120 : 96, height: isLevel ? 3 : 2)
+                        .rotationEffect(.degrees(-tilt))
+                        .position(x: width / 2, y: height / 2)
+                }
+            }
+        }
+    }
+
     private var topBar: some View {
         VStack(spacing: 10) {
             HStack(alignment: .top) {
@@ -159,6 +206,16 @@ struct ShotCameraView: View {
                 }
                 .disabled(isBusy)
                 .opacity(isBusy ? 0.4 : 1)
+
+                Button {
+                    showGrid.toggle()
+                } label: {
+                    Image(systemName: showGrid ? "grid" : "square")
+                        .font(.headline)
+                        .padding(12)
+                        .background(Color.black.opacity(0.5), in: Circle())
+                }
+                .opacity(isBusy ? 0 : 1)
 
                 Spacer()
 
@@ -196,7 +253,7 @@ struct ShotCameraView: View {
                     .padding(.vertical, 6)
                     .background(Color.black.opacity(0.5), in: Capsule())
             }
-            if !shot.variants.isEmpty {
+            if !shot.variants.isEmpty && fixedVariant == nil {
                 Picker("Version", selection: $variant) {
                     ForEach(shot.variants.indices, id: \.self) { index in
                         Text(shot.variants[index]).tag(index)
@@ -432,7 +489,7 @@ struct ShotCameraView: View {
                                 .background(Color.white.opacity(0.12), in: Circle())
                         }
                     }
-                    if !shot.variants.isEmpty {
+                    if !shot.variants.isEmpty && fixedVariant == nil {
                         Picker("Version", selection: $variant) {
                             ForEach(shot.variants.indices, id: \.self) { index in
                                 Text(shot.variants[index]).tag(index)
@@ -526,9 +583,10 @@ struct ShotCameraView: View {
         UIApplication.shared.isIdleTimerDisabled = true
         location.start()
         take = store.nextTake(tripID: tripID, shot: shot)
-        variant = shot.defaultVariant(forTake: take)
+        variant = variantFor(take: take)
         timing = TimingStore.load(shot, plan: plan)
         showBriefing = plan.isInShot
+        level.start()
         CameraController.requestAccess { allowed in
             if allowed {
                 cameraAllowed = true
@@ -545,6 +603,7 @@ struct ShotCameraView: View {
             camera.stopRecording()
         }
         camera.stop()
+        level.stop()
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
@@ -692,8 +751,17 @@ struct ShotCameraView: View {
 
     private func reviewDismissed() {
         take = store.nextTake(tripID: tripID, shot: shot)
-        variant = shot.defaultVariant(forTake: take)
-        let count = store.trip(id: tripID)?.takeCount(of: shot) ?? 0
+        variant = variantFor(take: take)
+        guard let trip = store.trip(id: tripID) else { return }
+        if let fixedVariant {
+            // One half of a transition: done once that half has a take.
+            let half = ShotSlot(shot: shot, half: fixedVariant)
+            if half.takeCount(in: trip) >= half.target, let name = half.variantName {
+                message = "\(name) half done. Film another, or tap ✕ to pick the next shot."
+            }
+            return
+        }
+        let count = trip.takeCount(of: shot)
         if count >= shot.targetTakes {
             let noun = shot.targetTakes == 1 ? "take" : "takes"
             message = "All \(shot.targetTakes) \(noun) done. Film an extra, or tap ✕ to pick the next shot."
