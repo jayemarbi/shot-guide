@@ -23,6 +23,7 @@ struct ShotCameraView: View {
     @State private var showBriefing: Bool
     @State private var timing = ShotTiming(countdown: 5, stopsByItself: true, length: 10)
     @State private var showTiming = false
+    @State private var pinching = false
     @State private var countdownRemaining: Int? = nil
     @State private var countdownTask: Task<Void, Never>? = nil
     @State private var cameraAllowed = false
@@ -106,7 +107,18 @@ struct ShotCameraView: View {
                 onDrag: { distance in
                     camera.nudgeExposure(by: Float(-distance / 250))
                 },
-                onButton: { recordTapped() })
+                onButton: { recordTapped() },
+                onPinch: { scale, state in
+                    switch state {
+                    case .began:
+                        pinching = true
+                        camera.pinchZoom(scale: scale, began: true)
+                    case .changed:
+                        camera.pinchZoom(scale: scale, began: false)
+                    default:
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { pinching = false }
+                    }
+                })
                 .ignoresSafeArea()
                 .overlay {
                     if let focusPoint {
@@ -360,6 +372,13 @@ struct ShotCameraView: View {
 
     private var bottomControls: some View {
         VStack(spacing: 14) {
+            if pinching && !camera.lensLabel.isEmpty {
+                Text(camera.lensLabel)
+                    .font(.headline.monospacedDigit())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.6), in: Capsule())
+            }
             if !isBusy && !plan.isInShot && !plan.before.isEmpty {
                 Text(plan.before)
                     .font(.subheadline)

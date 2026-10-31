@@ -19,14 +19,16 @@ final class PreviewView: UIView {
     }
 }
 
-/// The live camera picture. Tap to focus, hold to lock focus and exposure, drag up or down for brightness.
-/// The volume buttons, Camera Control and Bluetooth shutter remotes call `onButton`.
+/// The live camera picture. Tap to focus, hold to lock focus and exposure, drag up or down with one finger
+/// for brightness, pinch to zoom. The volume buttons, Camera Control and Bluetooth shutter remotes call `onButton`.
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     var onTap: (CGPoint, CGPoint) -> Void
     var onHold: (CGPoint, CGPoint) -> Void
     var onDrag: (CGFloat) -> Void
     var onButton: () -> Void
+    /// The pinch's scale since it began, and whether it's starting, moving or done.
+    var onPinch: (CGFloat, UIGestureRecognizer.State) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -47,7 +49,11 @@ struct CameraPreview: UIViewRepresentable {
         hold.minimumPressDuration = 0.6
         view.addGestureRecognizer(hold)
         let drag = UIPanGestureRecognizer(target: coordinator, action: #selector(Coordinator.dragged(_:)))
+        // One finger only, so a two-finger pinch doesn't change the brightness too.
+        drag.maximumNumberOfTouches = 1
         view.addGestureRecognizer(drag)
+        let pinch = UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.pinched(_:)))
+        view.addGestureRecognizer(pinch)
 
         let buttons = AVCaptureEventInteraction { event in
             if event.phase == .ended {
@@ -92,6 +98,10 @@ struct CameraPreview: UIViewRepresentable {
             let translation = gesture.translation(in: view)
             gesture.setTranslation(.zero, in: view)
             parent.onDrag(translation.y)
+        }
+
+        @objc func pinched(_ gesture: UIPinchGestureRecognizer) {
+            parent.onPinch(gesture.scale, gesture.state)
         }
     }
 }

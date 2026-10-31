@@ -37,7 +37,8 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var exposureLocked = false
     @Published private(set) var availableLenses: [LensChoice] = []
     @Published private(set) var lensTitles: [LensChoice: String] = [:]
-    @Published private(set) var currentLens: LensChoice = .wide
+    /// The lens button to highlight. nil after a pinch, when the zoom sits between lenses.
+    @Published private(set) var currentLens: LensChoice? = .wide
     @Published private(set) var hasTorch = false
 
     let session = AVCaptureSession()
@@ -51,6 +52,7 @@ final class CameraController: NSObject, ObservableObject {
     private var device: AVCaptureDevice?
     private var config: CaptureConfig?
     private var exposureBias: Float = 0
+    private var pinchStart: CGFloat = 1
 
     // Main-thread state
     private var mainConfig: CaptureConfig?
@@ -229,9 +231,10 @@ final class CameraController: NSObject, ObservableObject {
 
     // MARK: Lenses and zoom
 
+    /// Jumps to a lens's zoom. Also used after each take to undo any pinch zoom, front camera included.
     func setLens(_ lens: LensChoice) {
         sessionQueue.async {
-            guard let device = self.device, lens != .front else { return }
+            guard let device = self.device else { return }
             let factor = Self.clampZoom(Self.zoomFactor(for: lens, device: device), device: device)
             do {
                 try device.lockForConfiguration()
@@ -242,6 +245,30 @@ final class CameraController: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self.currentLens = lens
                 self.lensLabel = label
+            }
+        }
+    }
+
+    /// Pinch to zoom. `scale` is how far the fingers have spread since the pinch began.
+    /// Stops at 20x; past the 5x lens it's digital zoom.
+    func pinchZoom(scale: CGFloat, began: Bool) {
+        sessionQueue.async {
+            guard let device = self.device else { return }
+            if began {
+                self.pinchStart = device.videoZoomFactor
+            }
+            let multiplier = Self.displayMultiplier(device)
+            let ceiling = CGFloat(20 / multiplier)
+            let factor = min(Self.clampZoom(self.pinchStart * scale, device: device), max(ceiling, device.minAvailableVideoZoomFactor))
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = factor
+                device.unlockForConfiguration()
+            } catch {}
+            let label = Self.formatZoom(Double(factor) * multiplier)
+            DispatchQueue.main.async {
+                self.lensLabel = label
+                self.currentLens = nil
             }
         }
     }
