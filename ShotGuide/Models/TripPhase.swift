@@ -72,7 +72,7 @@ enum TripPhase: String, CaseIterable, Identifiable {
             return "Easiest first, down to the ones worth taking your time over. TIMELAPSE ties up the phone, "
                 + "so save it for when you sit down for a while, like waiting for sunset."
         case .leaving:
-            return "As you go. The Out halves end this place in an edit. "
+            return "As you go. The Out halves end this place in an edit, and VOICEOVER is best somewhere quiet, like the car. "
                 + "Shots marked extra are for when the day allows, so they don't count towards the total."
         }
     }
@@ -98,7 +98,8 @@ enum TripPhase: String, CaseIterable, Identifiable {
             return [
                 ShotSlot(shot: .transition, half: 0),
                 ShotSlot(shot: .whip, half: 0),
-                ShotSlot(shot: .bodyWipe, half: 0)
+                ShotSlot(shot: .bodyWipe, half: 0),
+                ShotSlot(shot: .voiceover, half: nil)
             ]
         }
     }

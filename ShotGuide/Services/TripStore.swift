@@ -59,6 +59,12 @@ final class TripStore: ObservableObject {
         try json.write(to: folder.appendingPathComponent("trip.json"), options: .atomic)
         let csv = Self.catalogCSV(for: trip)
         try Data(csv.utf8).write(to: folder.appendingPathComponent("catalog.csv"), options: .atomic)
+        let factsURL = folder.appendingPathComponent("facts.txt")
+        if let facts = trip.facts, !facts.isEmpty {
+            try Data(("\(trip.place)\n\n" + facts.text).utf8).write(to: factsURL, options: .atomic)
+        } else {
+            try? FileManager.default.removeItem(at: factsURL)
+        }
     }
 
     private func replace(_ trip: Trip) {
@@ -111,26 +117,62 @@ final class TripStore: ObservableObject {
         trips.removeAll { $0.id == id }
     }
 
+    func updateFacts(_ facts: TripFacts, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        trip.facts = facts.isEmpty ? nil : facts
+        replace(trip)
+    }
+
     // MARK: Clips
 
     func nextTake(tripID: UUID, shot: ShotType) -> Int {
+        nextTake(tripID: tripID, shotName: shot.rawValue)
+    }
+
+    func nextTake(tripID: UUID, shotName: String) -> Int {
         guard let trip = self.trip(id: tripID) else { return 1 }
-        return (trip.clips.filter { $0.shot == shot.rawValue }.map { $0.take }.max() ?? 0) + 1
+        return (trip.clips.filter { $0.shot == shotName }.map { $0.take }.max() ?? 0) + 1
     }
 
     /// Where the next clip goes, named the playbook way: Place_YYYY-MM-DD_SHOT_##.mov
     func newClipURL(tripID: UUID, shot: ShotType, take: Int, date: Date) -> URL? {
+        newClipURL(tripID: tripID, shotName: shot.rawValue, take: take, date: date, fileExtension: "mov")
+    }
+
+    /// The same naming for anything else: a VOICEOVER .m4a, or a photo or video added from Photos.
+    func newClipURL(tripID: UUID, shotName: String, take: Int, date: Date, fileExtension: String) -> URL? {
         guard let trip = self.trip(id: tripID) else { return nil }
         let folder = folderURL(for: trip)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let day = Self.dayString(date, timeZone: .current)
         var number = take
-        var url = folder.appendingPathComponent(Self.clipName(code: trip.fileCode, day: day, shot: shot, take: number))
+        var url = folder.appendingPathComponent(
+            Self.clipName(code: trip.fileCode, day: day, shotName: shotName, take: number, fileExtension: fileExtension))
         while FileManager.default.fileExists(atPath: url.path) {
             number += 1
-            url = folder.appendingPathComponent(Self.clipName(code: trip.fileCode, day: day, shot: shot, take: number))
+            url = folder.appendingPathComponent(
+                Self.clipName(code: trip.fileCode, day: day, shotName: shotName, take: number, fileExtension: fileExtension))
         }
         return url
+    }
+
+    /// Free space on the phone, in bytes.
+    var freeBytes: Int64? {
+        (try? documents.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage
+    }
+
+    /// Roughly how many minutes of 4K video still fit, at about 200 MB a minute.
+    var minutesOfVideoLeft: Int? {
+        freeBytes.map { Int(max($0, 0) / 200_000_000) }
+    }
+
+    /// "About 45 min of 4K space left", or "About 3 hours of 4K space left".
+    var spaceLeftText: String? {
+        guard let minutes = minutesOfVideoLeft else { return nil }
+        if minutes >= 120 {
+            return "About \(minutes / 60) hours of 4K space left"
+        }
+        return "About \(minutes) min of 4K space left"
     }
 
     func addClip(_ clip: Clip, to tripID: UUID) {
@@ -245,8 +287,11 @@ final class TripStore: ObservableObject {
         return folderPath.hasPrefix(prefix) ? String(folderPath.dropFirst(prefix.count)) : folderPath
     }
 
+    /// Clips, masks, voiceovers and anything added from Photos: copied first, and skipped when already on the drive.
+    static let mediaExtensions: Set<String> = ["mov", "mp4", "m4v", "m4a", "heic", "heif", "jpg", "jpeg", "png", "dng"]
+
     static func isVideo(_ url: URL) -> Bool {
-        url.pathExtension.lowercased() == "mov"
+        mediaExtensions.contains(url.pathExtension.lowercased())
     }
 
     /// A clip you filmed, as opposed to a cutout mask made from one.
@@ -310,7 +355,11 @@ final class TripStore: ObservableObject {
     // MARK: Names, dates and the catalogue
 
     static func clipName(code: String, day: String, shot: ShotType, take: Int) -> String {
-        "\(code)_\(day)_\(shot.rawValue)_\(String(format: "%02d", take)).mov"
+        clipName(code: code, day: day, shotName: shot.rawValue, take: take, fileExtension: "mov")
+    }
+
+    static func clipName(code: String, day: String, shotName: String, take: Int, fileExtension: String) -> String {
+        "\(code)_\(day)_\(shotName)_\(String(format: "%02d", take)).\(fileExtension)"
     }
 
     /// "Mount Barney" becomes "MountBarney". Accents are dropped so names work everywhere.
@@ -353,7 +402,7 @@ final class TripStore: ObservableObject {
     static let catalogColumns = [
         "file", "place", "state", "country", "continent", "latitude", "longitude", "date", "time", "light",
         "shot", "take", "in_shot", "lens", "fps", "resolution", "length_s", "tags", "favourite", "notes",
-        "variant", "mask_file", "captions_file", "transcript"
+        "variant", "mask_file", "captions_file", "transcript", "marks_s"
     ]
 
     static func catalogCSV(for trip: Trip) -> String {
@@ -384,7 +433,8 @@ final class TripStore: ObservableObject {
                 clip.variant ?? "",
                 clip.maskFileName ?? "",
                 clip.captionsFileName ?? "",
-                clip.transcript ?? ""
+                clip.transcript ?? "",
+                (clip.marks ?? []).map { String(format: "%.1f", $0) }.joined(separator: "; ")
             ]
             lines.append(row.map { csvField($0) }.joined(separator: ","))
         }

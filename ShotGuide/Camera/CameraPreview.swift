@@ -20,13 +20,16 @@ final class PreviewView: UIView {
 }
 
 /// The live camera picture. Tap to focus, hold to lock focus and exposure, drag up or down with one finger
-/// for brightness, pinch to zoom. The volume buttons, Camera Control and Bluetooth shutter remotes call `onButton`.
+/// for brightness, pinch to zoom. Volume up, Camera Control and Bluetooth shutter remotes call `onButton`;
+/// volume down calls `onSecondaryButton`.
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     var onTap: (CGPoint, CGPoint) -> Void
     var onHold: (CGPoint, CGPoint) -> Void
     var onDrag: (CGFloat) -> Void
     var onButton: () -> Void
+    /// Volume down. While recording it marks the moment; otherwise it starts, like the other buttons.
+    var onSecondaryButton: () -> Void
     /// The pinch's scale since it began, and whether it's starting, moving or done.
     var onPinch: (CGFloat, UIGestureRecognizer.State) -> Void
 
@@ -55,11 +58,17 @@ struct CameraPreview: UIViewRepresentable {
         let pinch = UIPinchGestureRecognizer(target: coordinator, action: #selector(Coordinator.pinched(_:)))
         view.addGestureRecognizer(pinch)
 
-        let buttons = AVCaptureEventInteraction { event in
-            if event.phase == .ended {
-                coordinator.parent.onButton()
-            }
-        }
+        let buttons = AVCaptureEventInteraction(
+            primary: { event in
+                if event.phase == .ended {
+                    coordinator.parent.onButton()
+                }
+            },
+            secondary: { event in
+                if event.phase == .ended {
+                    coordinator.parent.onSecondaryButton()
+                }
+            })
         view.addInteraction(buttons)
         return view
     }

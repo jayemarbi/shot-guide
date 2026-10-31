@@ -33,6 +33,10 @@ struct ShotCameraView: View {
     @State private var zoomStarted = false
     @State private var message: String? = nil
     @State private var started = false
+    @State private var marks: [Double] = []
+    @State private var markNote: String? = nil
+    @State private var lowLight = false
+    @State private var micName = ""
 
     init(tripID: UUID, shot: ShotType, fixedVariant: Int? = nil) {
         self.tripID = tripID
@@ -48,7 +52,28 @@ struct ShotCameraView: View {
     }
 
     private var plan: ShotPlan {
-        shot.plan(take: take, inShot: inShot, variant: variant)
+        var plan = shot.plan(take: take, inShot: inShot, variant: variant)
+        // 60 fps lets an edit slow movement down, but it needs light. Once the sun is down, 30 fps looks better.
+        if lowLight && plan.fps == 60 {
+            plan.fps = 30
+        }
+        return plan
+    }
+
+    /// Seconds of extra footage after a timeline ends, so the edit has room for transitions and speed ramps.
+    static let extraSeconds: Double = 2
+
+    private var hasExtra: Bool {
+        timing.stopsByItself && plan.timelapseInterval == nil
+    }
+
+    /// When recording stops by itself, extra seconds included.
+    private var stopTime: Double {
+        timing.length + (hasExtra ? Self.extraSeconds : 0)
+    }
+
+    private var isTalkingShot: Bool {
+        ClipPrep.talkingShots.contains(shot.rawValue)
     }
 
     private var isBusy: Bool {
@@ -72,9 +97,16 @@ struct ShotCameraView: View {
             })
     }
 
-    /// The timeline fitted to how this take will end.
+    /// The timeline fitted to how this take will end, plus the extra seconds as their own step.
     private var displaySteps: [GuideStep] {
-        plan.timeline(endingAt: timing.stopsByItself ? timing.length : nil)
+        var steps = plan.timeline(endingAt: timing.stopsByItself ? timing.length : nil)
+        if hasExtra {
+            let text = plan.isInShot
+                ? "Hold still for 2 more seconds. It gives the edit room."
+                : "Keep the phone steady for 2 more seconds. It gives the edit room."
+            steps.append(GuideStep(start: timing.length, end: stopTime, text: text))
+        }
+        return steps
     }
 
     private var startHint: String {
@@ -108,6 +140,13 @@ struct ShotCameraView: View {
                     camera.nudgeExposure(by: Float(-distance / 250))
                 },
                 onButton: { recordTapped() },
+                onSecondaryButton: {
+                    if camera.phase == .recording {
+                        markMoment()
+                    } else {
+                        recordTapped()
+                    }
+                },
                 onPinch: { scale, state in
                     switch state {
                     case .began:
@@ -155,6 +194,14 @@ struct ShotCameraView: View {
             }
         }
         .statusBarHidden(true)
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+            micName = MicCheck.currentMicName() ?? ""
+        }
+        .onChange(of: camera.phase) { _, phase in
+            if phase == .ready {
+                micName = MicCheck.currentMicName() ?? ""
+            }
+        }
         .onAppear(perform: start)
         .onDisappear(perform: finish)
         .onChange(of: camera.elapsed) { _, value in
@@ -237,6 +284,11 @@ struct ShotCameraView: View {
                     Text([camera.lensLabel, camera.formatLabel].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption)
                         .foregroundStyle(Color.white.opacity(0.8))
+                    if isTalkingShot && !micName.isEmpty {
+                        Label("Mic: \(micName)", systemImage: "mic.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color.white.opacity(0.8))
+                    }
                     if camera.exposureLocked {
                         Text("FOCUS AND EXPOSURE LOCKED")
                             .font(.caption2.weight(.bold))
@@ -372,6 +424,14 @@ struct ShotCameraView: View {
 
     private var bottomControls: some View {
         VStack(spacing: 14) {
+            if let markNote {
+                Label(markNote, systemImage: "star.fill")
+                    .font(.headline)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.6), in: Capsule())
+                    .foregroundStyle(Color.yellow)
+            }
             if pinching && !camera.lensLabel.isEmpty {
                 Text(camera.lensLabel)
                     .font(.headline.monospacedDigit())
@@ -392,7 +452,7 @@ struct ShotCameraView: View {
                         .fill(Color.red)
                         .frame(width: 10, height: 10)
                     Text(timing.stopsByItself
-                         ? "\(clockString(camera.elapsed)) / \(clockString(timing.length))"
+                         ? "\(clockString(camera.elapsed)) / \(clockString(stopTime))"
                          : clockString(camera.elapsed))
                         .font(.headline.monospacedDigit())
                 }
@@ -412,6 +472,16 @@ struct ShotCameraView: View {
                                 .padding(.vertical, 8)
                                 .background(Color.black.opacity(0.5), in: Capsule())
                         }
+                    } else if camera.phase == .recording && plan.timelapseInterval == nil {
+                        // Tap when something great happens, so the edit can cut straight to it.
+                        Button(action: markMoment) {
+                            Label("Mark", systemImage: "star.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color.yellow.opacity(0.85), in: Capsule())
+                                .foregroundStyle(Color.black)
+                        }
                     } else {
                         Color.clear
                     }
@@ -427,7 +497,7 @@ struct ShotCameraView: View {
                         Button {
                             showTiming = true
                         } label: {
-                            let summary = TimingControls.summary(timing)
+                            let summary = TimingControls.summary(timing, extraSeconds: hasExtra ? Self.extraSeconds : 0)
                             VStack(alignment: .leading, spacing: 2) {
                                 Label(summary.countdown, systemImage: "timer")
                                 Text(summary.ending)
@@ -601,11 +671,17 @@ struct ShotCameraView: View {
         started = true
         UIApplication.shared.isIdleTimerDisabled = true
         location.start()
+        if let coordinate = location.location?.coordinate {
+            lowLight = SunCalc.elevation(at: Date(), latitude: coordinate.latitude, longitude: coordinate.longitude).degrees < 0
+        }
         take = store.nextTake(tripID: tripID, shot: shot)
         variant = variantFor(take: take)
         timing = TimingStore.load(shot, plan: plan)
         showBriefing = plan.isInShot
         level.start()
+        if let minutes = store.minutesOfVideoLeft, minutes < 10 {
+            message = "Only about \(minutes) minutes of 4K space left. Copy a trip to your SSD soon."
+        }
         CameraController.requestAccess { allowed in
             if allowed {
                 cameraAllowed = true
@@ -709,8 +785,22 @@ struct ShotCameraView: View {
         let used = plan
         let coordinate = location.location?.coordinate
         zoomStarted = false
+        marks = []
         camera.startRecording(to: url, latitude: coordinate?.latitude, longitude: coordinate?.longitude) { result in
             saveTake(result, plan: used, startedAt: now, latitude: coordinate?.latitude, longitude: coordinate?.longitude)
+        }
+    }
+
+    private func markMoment() {
+        guard camera.phase == .recording else { return }
+        let time = camera.elapsed
+        marks.append(time)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        markNote = "Marked at \(clockString(time))"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if markNote == "Marked at \(clockString(time))" {
+                markNote = nil
+            }
         }
     }
 
@@ -720,7 +810,7 @@ struct ShotCameraView: View {
             zoomStarted = true
             camera.rampZoom(fromDisplay: ramp.from, toDisplay: ramp.to, duration: ramp.duration)
         }
-        if timing.stopsByItself, value >= timing.length {
+        if timing.stopsByItself, value >= stopTime {
             camera.stopRecording()
         }
     }
@@ -732,6 +822,7 @@ struct ShotCameraView: View {
             message = "That take didn't save. Try again."
             return
         }
+        let takeMarks = marks
         Task { @MainActor in
             let duration = await Self.duration(of: result.url) ?? result.elapsed
             let light = SunCalc.light(at: startedAt, latitude: latitude, longitude: longitude)
@@ -762,7 +853,8 @@ struct ShotCameraView: View {
                 inShot: used.isInShot,
                 tags: tags,
                 favourite: false,
-                notes: "")
+                notes: "",
+                marks: takeMarks.isEmpty ? nil : takeMarks)
             store.addClip(clip, to: tripID)
             reviewClip = clip
         }

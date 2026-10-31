@@ -25,8 +25,69 @@ struct Clip: Codable, Identifiable, Hashable {
     var captionsFileName: String? = nil
     /// What you said, as text. Empty once a clip has been checked and had no speech.
     var transcript: String? = nil
+    /// Seconds into the clip where you tapped Mark during recording.
+    var marks: [Double]? = nil
 
     var shotType: ShotType? { ShotType(rawValue: shot) }
+
+    var isPhoto: Bool {
+        ["heic", "heif", "jpg", "jpeg", "png", "dng"].contains((fileName as NSString).pathExtension.lowercased())
+    }
+
+    var isAudio: Bool {
+        (fileName as NSString).pathExtension.lowercased() == "m4a"
+    }
+}
+
+/// Details about the place, for text on screen and "things to know before you go" reels.
+struct TripFacts: Codable, Hashable {
+    var distance = ""
+    var time = ""
+    var elevation = ""
+    var difficulty = ""
+    var cost = ""
+    var parking = ""
+    var gettingThere = ""
+    var bestTime = ""
+    var tips = ""
+
+    init() {}
+
+    // Each field is optional when reading, so facts saved by older versions still load.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        distance = try container.decodeIfPresent(String.self, forKey: .distance) ?? ""
+        time = try container.decodeIfPresent(String.self, forKey: .time) ?? ""
+        elevation = try container.decodeIfPresent(String.self, forKey: .elevation) ?? ""
+        difficulty = try container.decodeIfPresent(String.self, forKey: .difficulty) ?? ""
+        cost = try container.decodeIfPresent(String.self, forKey: .cost) ?? ""
+        parking = try container.decodeIfPresent(String.self, forKey: .parking) ?? ""
+        gettingThere = try container.decodeIfPresent(String.self, forKey: .gettingThere) ?? ""
+        bestTime = try container.decodeIfPresent(String.self, forKey: .bestTime) ?? ""
+        tips = try container.decodeIfPresent(String.self, forKey: .tips) ?? ""
+    }
+
+    private var labelled: [(String, String)] {
+        [("Distance", distance), ("Time", time), ("Elevation gain", elevation), ("Difficulty", difficulty),
+         ("Cost", cost), ("Parking", parking), ("Getting there", gettingThere), ("Best time to go", bestTime), ("Tips", tips)]
+            .map { ($0.0, $0.1.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .filter { !$0.1.isEmpty }
+    }
+
+    var isEmpty: Bool { labelled.isEmpty }
+
+    /// One line for the trip page, like "8 km return · 3 hours · Hard · Free".
+    var summary: String {
+        [distance, time, difficulty, cost]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    /// The facts as plain text, for facts.txt next to the clips.
+    var text: String {
+        labelled.map { "\($0.0): \($0.1)" }.joined(separator: "\n") + "\n"
+    }
 }
 
 struct Trip: Codable, Identifiable, Hashable {
@@ -43,6 +104,7 @@ struct Trip: Codable, Identifiable, Hashable {
     /// Relative to the app's Documents folder, e.g. "Library/Oceania/Australia/Queensland/2026-11-08 Mount Barney".
     var folderPath: String
     var clips: [Clip] = []
+    var facts: TripFacts? = nil
 
     var regionLine: String {
         [state, country].filter { !$0.isEmpty }.joined(separator: ", ")

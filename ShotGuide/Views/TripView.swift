@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -16,6 +17,9 @@ struct TripView: View {
     @State private var pickingFolder = false
     @State private var copyProgress: String? = nil
     @State private var copiedMessage: String? = nil
+    @State private var pickedItems: [PhotosPickerItem] = []
+    @State private var importMessage: String? = nil
+    @State private var showFacts = false
 
     var body: some View {
         Group {
@@ -33,8 +37,13 @@ struct TripView: View {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
                     Text([trip.regionLine, trip.continent].filter { !$0.isEmpty }.joined(separator: " · "))
-                    Text("\(trip.doneTotal) of \(trip.targetTotal) clips · \(store.freeSpaceText)")
+                    Text("\(trip.doneTotal) of \(trip.targetTotal) clips")
                         .foregroundStyle(.secondary)
+                    if let space = store.spaceLeftText {
+                        let low = (store.minutesOfVideoLeft ?? 0) < 15
+                        Text(low ? "\(space). Running low: copy a trip to your SSD to free some up." : space)
+                            .foregroundStyle(low ? Color.red : Color.secondary)
+                    }
                 }
                 .font(.subheadline)
                 if let copyProgress {
@@ -62,11 +71,25 @@ struct TripView: View {
                     ForEach(phase.slots) { slot in
                         slotRow(slot, trip: trip)
                     }
+                    if phase == .leaving {
+                        factsRow(trip)
+                    }
                 } header: {
                     Text(phase.title)
                 } footer: {
                     Text(phase.footer)
                 }
+            }
+
+            Section {
+                PhotosPicker(selection: $pickedItems, matching: .any(of: [.videos, .images]), preferredItemEncoding: .current) {
+                    Label("Add from Photos", systemImage: "photo.on.rectangle.angled")
+                }
+                .disabled(exporting)
+            } header: {
+                Text("From other cameras")
+            } footer: {
+                Text("Star time-lapses, Cinematic mode, drone or GoPro clips and photos. They're named, tagged and copied to your SSD like the rest.")
             }
 
             if !trip.clips.isEmpty {
@@ -127,7 +150,26 @@ struct TripView: View {
             Text(copiedMessage ?? "")
         }
         .fullScreenCover(item: $activeSlot) { slot in
-            ShotCameraView(tripID: tripID, shot: slot.shot, fixedVariant: slot.half)
+            if slot.shot == .voiceover {
+                VoiceoverView(tripID: tripID)
+            } else {
+                ShotCameraView(tripID: tripID, shot: slot.shot, fixedVariant: slot.half)
+            }
+        }
+        .sheet(isPresented: $showFacts) {
+            TripFactsView(tripID: tripID)
+        }
+        .onChange(of: pickedItems) { _, items in
+            guard !items.isEmpty else { return }
+            importItems(items)
+        }
+        .alert(
+            "Added from Photos",
+            isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importMessage ?? "")
         }
         .sheet(item: $selectedClip) { clip in
             ReviewView(tripID: tripID, clipID: clip.id, autoplay: false, preselectSuggestions: false, title: "Clip")
@@ -164,6 +206,50 @@ struct TripView: View {
         guard let latitude = coordinate?.latitude ?? trip.latitude,
               let longitude = coordinate?.longitude ?? trip.longitude else { return nil }
         return SunCalc.lightLine(at: date, latitude: latitude, longitude: longitude)
+    }
+
+    private func factsRow(_ trip: Trip) -> some View {
+        let summary = trip.facts?.summary ?? ""
+        return Button {
+            showFacts = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "list.bullet.clipboard")
+                    .frame(width: 28)
+                    .foregroundStyle(Color.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("TRIP FACTS")
+                        .font(.headline)
+                    Text(summary.isEmpty ? "Distance, time, cost, tips: for on-screen text and guide reels" : summary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if trip.facts != nil {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                }
+            }
+        }
+        .foregroundStyle(Color.primary)
+    }
+
+    private func importItems(_ items: [PhotosPickerItem]) {
+        pickedItems = []
+        exporting = true
+        copyProgress = "Adding from Photos…"
+        UIApplication.shared.isIdleTimerDisabled = true
+        Task { @MainActor in
+            let added = await MediaImporter.importItems(items, tripID: tripID, store: store) { copyProgress = $0 }
+            endExport()
+            if added == items.count {
+                importMessage = added == 1
+                    ? "Added to the trip with its time, place and suggested tags. Tap it under Clips to check the tags."
+                    : "All \(added) added to the trip with their times, places and suggested tags. Tap each under Clips to check the tags."
+            } else {
+                importMessage = "\(added) of \(items.count) added. The rest couldn't be read."
+            }
+        }
     }
 
     private func slotRow(_ slot: ShotSlot, trip: Trip) -> some View {

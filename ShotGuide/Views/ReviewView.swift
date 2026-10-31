@@ -1,5 +1,6 @@
 import AVKit
 import SwiftUI
+import UIKit
 
 /// Shown after each take (and when you tap a clip later): watch it back, tag it, star it or delete it.
 struct ReviewView: View {
@@ -14,6 +15,7 @@ struct ReviewView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var player: AVPlayer? = nil
+    @State private var photo: UIImage? = nil
     @State private var suggested: Set<String> = []
     @State private var selected: Set<String> = []
     @State private var favourite = false
@@ -30,7 +32,19 @@ struct ReviewView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if let player {
+                    if let photo {
+                        Image(uiImage: photo)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 420)
+                            .frame(maxWidth: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    } else if let player, clip?.isAudio == true {
+                        // Sound only: just the play controls.
+                        VideoPlayer(player: player)
+                            .frame(height: 90)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    } else if let player {
                         VideoPlayer(player: player)
                             .aspectRatio(9.0 / 16.0, contentMode: .fit)
                             .frame(maxHeight: 420)
@@ -83,19 +97,30 @@ struct ReviewView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The video file is removed from your phone.")
+                Text("The file is removed from your phone.")
             }
         }
     }
 
     private func details(for clip: Clip) -> some View {
-        let parts = [clip.light, clip.lens, "\(clip.fps) fps", String(format: "%.1f s", clip.durationSeconds)]
+        let parts = [
+            clip.light,
+            clip.lens,
+            clip.fps > 0 ? "\(clip.fps) fps" : "",
+            clip.isPhoto ? "" : String(format: "%.1f s", clip.durationSeconds)
+        ]
+        let marks = (clip.marks ?? []).map { clockString($0) }
         return VStack(alignment: .leading, spacing: 4) {
             Text(clip.fileName)
                 .font(.subheadline.weight(.semibold))
             Text(parts.filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if !marks.isEmpty {
+                Label("Marked at " + marks.joined(separator: ", "), systemImage: "star.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.yellow)
+            }
         }
     }
 
@@ -106,10 +131,14 @@ struct ReviewView: View {
         favourite = clip.favourite
         notes = clip.notes
         let url = store.clipURL(clip, in: trip)
-        let newPlayer = AVPlayer(url: url)
-        player = newPlayer
-        if autoplay {
-            newPlayer.play()
+        if clip.isPhoto {
+            photo = UIImage(contentsOfFile: url.path)
+        } else {
+            let newPlayer = AVPlayer(url: url)
+            player = newPlayer
+            if autoplay {
+                newPlayer.play()
+            }
         }
         let preselect = preselectSuggestions
         TagSuggester.suggest(for: url) { tags in

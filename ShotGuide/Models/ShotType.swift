@@ -120,6 +120,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case secondAngle = "SECONDANGLE"
     case bodyWipe = "BODYWIPE"
     case whip = "WHIP"
+    /// Sound only, recorded on its own screen rather than the camera.
+    case voiceover = "VOICEOVER"
 
     var id: String { rawValue }
 
@@ -147,7 +149,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// don't count towards a trip's total.
     var countsTowardTotal: Bool {
         switch self {
-        case .bodyWipe, .whip, .follow, .food, .onTheWay: return false
+        case .bodyWipe, .whip, .follow, .food, .onTheWay, .voiceover: return false
         default: return true
         }
     }
@@ -197,6 +199,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .secondAngle: return "You getting the hero shot"
         case .bodyWipe: return "Walk past the lens into the next place"
         case .whip: return "Whip pan from one place to the next"
+        case .voiceover: return "Your voice, for narration and captions"
         }
     }
 
@@ -235,7 +238,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             }
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 30, stabilisation: .cinematic,
+                lens: .wide, fps: 60, stabilisation: .cinematic,
                 autoStop: 11,
                 before: "Find something in front of the view: a rock, trees, a ridge.",
                 steps: [
@@ -284,7 +287,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             let lookBack = take % 2 == 0
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
-                lens: .ultraWide, fps: 30, stabilisation: .off,
+                lens: .ultraWide, fps: 60, stabilisation: .off,
                 autoStop: 16, countdown: 5,
                 before: lookBack
                     ? "Tripod at knee or hip height. This take, look back over your shoulder."
@@ -331,7 +334,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .follow:
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 30, stabilisation: .strongest,
+                lens: .wide, fps: 60, stabilisation: .strongest,
                 autoStop: 15,
                 before: "Your partner holds your hand and leads you towards the view. "
                     + "Film from your other hand, with their hand and the view in frame.",
@@ -381,7 +384,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .pov:
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 30, stabilisation: .strongest,
+                lens: .wide, fps: 60, stabilisation: .strongest,
                 autoStop: 15,
                 before: "Phone at chest height.",
                 steps: [
@@ -480,7 +483,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             if variantIndex == 0 {
                 return ShotPlan(
                     shot: self, take: take, group: .inShot,
-                    lens: .wide, fps: 30, stabilisation: .off,
+                    lens: .wide, fps: 60, stabilisation: .off,
                     autoStop: 6, countdown: 5,
                     before: "This one ends a place. Tripod at chest height, right beside your path. "
                         + "Walk left to right, brushing past the lens so you fill the frame.",
@@ -493,7 +496,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             }
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
-                lens: .wide, fps: 30, stabilisation: .off,
+                lens: .wide, fps: 60, stabilisation: .off,
                 autoStop: 6, countdown: 5,
                 before: "This one starts the next place. Walk the same way as the Out half: left to right.",
                 steps: [
@@ -507,7 +510,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             if variantIndex == 0 {
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
-                    lens: .wide, fps: 30, stabilisation: .off,
+                    lens: .wide, fps: 60, stabilisation: .off,
                     autoStop: 3,
                     before: "This one ends a place. Hold on the scene, then whip the phone hard to the right.",
                     steps: [
@@ -518,7 +521,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             }
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 30, stabilisation: .off,
+                lens: .wide, fps: 60, stabilisation: .off,
                 autoStop: 3,
                 before: "This one starts the next place. Point left of the scene, then whip right, same as the Out half.",
                 steps: [
@@ -526,6 +529,19 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 1, end: 3, text: "Hold steady.")
                 ],
                 variantName: variantName)
+
+        case .voiceover:
+            // Recorded by VoiceoverView, which shows these as talking points.
+            return ShotPlan(
+                shot: self, take: take, group: .inHand,
+                lens: .wide, fps: 30, stabilisation: .off,
+                autoStop: nil, manualLength: 60, countdown: 0,
+                before: "Somewhere quiet, like the car on the way back. Hold the phone a hand's width from your mouth.",
+                steps: [
+                    GuideStep(start: 0, end: 10, text: "Where you are and how you got here."),
+                    GuideStep(start: 10, end: 25, text: "What it was like. The moment that got you."),
+                    GuideStep(start: 25, end: nil, text: "One tip for anyone going. Stop when you're done.")
+                ])
         }
     }
 }

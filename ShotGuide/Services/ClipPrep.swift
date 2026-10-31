@@ -6,7 +6,8 @@ enum ClipPrep {
     static let talkingShots: Set<String> = [
         ShotType.talk.rawValue,
         ShotType.reaction.rawValue,
-        ShotType.secondAngle.rawValue
+        ShotType.secondAngle.rawValue,
+        ShotType.voiceover.rawValue
     ]
 
     static func needsMask(_ clip: Clip) -> Bool {

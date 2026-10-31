@@ -29,17 +29,18 @@ struct TimingControls: View {
                     steps: Self.lengthSteps,
                     format: { clockString($0) })
             } else {
-                Text("Keeps rolling until you press stop, a volume button or your Bluetooth remote.")
+                Text("Keeps rolling until you press stop, volume up or your Bluetooth remote. Volume down marks a moment instead.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    /// A one-line summary for the camera screen, like "10 s countdown · stops at 0:30".
-    static func summary(_ timing: ShotTiming) -> (countdown: String, ending: String) {
+    /// A one-line summary for the camera screen, like "0:10 countdown · Stops at 0:32".
+    /// `extraSeconds` is the hold the camera adds after the timeline, so the stop time shown is the real one.
+    static func summary(_ timing: ShotTiming, extraSeconds: Double = 0) -> (countdown: String, ending: String) {
         let countdown = timing.countdown == 0 ? "No countdown" : "\(clockString(Double(timing.countdown))) countdown"
-        let ending = timing.stopsByItself ? "Stops at \(clockString(timing.length))" : "You stop it"
+        let ending = timing.stopsByItself ? "Stops at \(clockString(timing.length + extraSeconds))" : "You stop it"
         return (countdown, ending)
     }
 }
