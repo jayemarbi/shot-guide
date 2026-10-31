@@ -22,7 +22,7 @@ Apps signed with a free Apple ID stop opening after 7 days. Install the same fil
 
 ## Getting footage off the phone
 
-On a trip's page, tap **Export trip**. Then plug into the PC, open Apple Devices › Files › Shot Guide, select the `.zip` and click Save.
+On a trip's page, tap **Export trip**. Then plug into the PC and open iTunes (the version from Apple's website, which Sideloadly needs anyway). Click the phone button near the top left, then **File Sharing** › Shot Guide, select the `.zip` and click **Save to**. If you use the Apple Devices app instead, it's under Files › Shot Guide.
 
 ## Code map
 

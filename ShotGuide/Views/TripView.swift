@@ -96,7 +96,7 @@ struct TripView: View {
             }
             Button("OK", role: .cancel) {}
         } message: { file in
-            Text("\(file.url.lastPathComponent) is in the Shot Guide folder. Plug into your PC and open Apple Devices › Files › Shot Guide to save it. Delete it from the phone afterwards to free up space.")
+            Text("\(file.url.lastPathComponent) is in the Shot Guide folder. Plug into your PC, open iTunes, click the phone button, then File Sharing › Shot Guide, and save it. (In the Apple Devices app it's Files › Shot Guide.) Delete it from the phone afterwards to free up space.")
         }
         .alert(
             "Export didn't work",
