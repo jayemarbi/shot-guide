@@ -39,10 +39,8 @@ struct TripView: View {
                     Text([trip.regionLine, trip.continent].filter { !$0.isEmpty }.joined(separator: " · "))
                     Text("\(trip.doneTotal) of \(trip.targetTotal) clips")
                         .foregroundStyle(.secondary)
-                    if let space = store.spaceLeftText {
-                        let low = (store.minutesOfVideoLeft ?? 0) < 15
-                        Text(low ? "\(space). Running low: copy a trip to your SSD to free some up." : space)
-                            .foregroundStyle(low ? Color.red : Color.secondary)
+                    if store.spaceLeftText != nil {
+                        spaceLine()
                     }
                 }
                 .font(.subheadline)
@@ -206,6 +204,15 @@ struct TripView: View {
         guard let latitude = coordinate?.latitude ?? trip.latitude,
               let longitude = coordinate?.longitude ?? trip.longitude else { return nil }
         return SunCalc.lightLine(at: date, latitude: latitude, longitude: longitude)
+    }
+
+    /// "About 45 min of 4K space left", in red with a nudge when it's running low.
+    private func spaceLine() -> some View {
+        let space: String = store.spaceLeftText ?? ""
+        let low: Bool = (store.minutesOfVideoLeft ?? 0) < 15
+        let text: String = low ? space + ". Running low: copy a trip to your SSD to free some up." : space
+        let colour: Color = low ? Color.red : Color.secondary
+        return Text(text).foregroundStyle(colour)
     }
 
     private func factsRow(_ trip: Trip) -> some View {
