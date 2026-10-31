@@ -158,11 +158,100 @@ final class TripStore: ObservableObject {
 
     // MARK: Export
 
+    /// The top folder a trip goes into on a drive or PC: Shot Guide/<continent>/<country>/<state>/<date place>/.
+    static let exportFolderName = "Shot Guide"
+
+    struct CopySummary {
+        /// Where the trip went, e.g. "Shot Guide › Oceania › Australia › Queensland › 2026-11-08 Mount Barney".
+        let path: String
+        let copied: Int
+        let alreadyThere: Int
+    }
+
+    /// Copies a trip onto a drive or folder you pick, such as an SSD plugged into the phone, into
+    /// Shot Guide/<continent>/<country>/<state>/<date place>/ beside the trips already there.
+    /// Clips already on the drive are skipped, so copying the same trip again only adds new takes.
+    func copyTrip(_ trip: Trip, to picked: URL,
+                  progress: @escaping (Int, Int) -> Void,
+                  completion: @escaping (Result<CopySummary, Error>) -> Void) {
+        let source = folderURL(for: trip)
+        let inside = Self.pathInsideLibrary(trip.folderPath)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fileManager = FileManager.default
+            let accessing = picked.startAccessingSecurityScopedResource()
+            defer {
+                if accessing {
+                    picked.stopAccessingSecurityScopedResource()
+                }
+            }
+            do {
+                // Picking the drive itself or the Shot Guide folder on it both end up in the same place.
+                let root = picked.lastPathComponent == Self.exportFolderName
+                    ? picked
+                    : picked.appendingPathComponent(Self.exportFolderName, isDirectory: true)
+                let target = root.appendingPathComponent(inside, isDirectory: true)
+                try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+
+                // Clips first and the catalogue last, so the catalogue on the drive never lists a missing clip.
+                let items = try fileManager.contentsOfDirectory(
+                    at: source, includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey], options: [.skipsHiddenFiles])
+                    .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true }
+                    .sorted { lhs, rhs in
+                        let lhsClip = Self.isClip(lhs)
+                        let rhsClip = Self.isClip(rhs)
+                        if lhsClip != rhsClip {
+                            return lhsClip
+                        }
+                        return lhs.lastPathComponent < rhs.lastPathComponent
+                    }
+
+                var copied = 0
+                var alreadyThere = 0
+                for (index, item) in items.enumerated() {
+                    DispatchQueue.main.async { progress(index + 1, items.count) }
+                    let copy = target.appendingPathComponent(item.lastPathComponent)
+                    if fileManager.fileExists(atPath: copy.path) {
+                        // A clip of the same size is already there. A different size means an earlier copy was cut short.
+                        if Self.isClip(item), Self.fileSize(item) == Self.fileSize(copy) {
+                            alreadyThere += 1
+                            continue
+                        }
+                        try fileManager.removeItem(at: copy)
+                    }
+                    try fileManager.copyItem(at: item, to: copy)
+                    if Self.isClip(item) {
+                        copied += 1
+                    }
+                }
+
+                let parts = [root.lastPathComponent] + inside.split(separator: "/").map(String.init)
+                let summary = CopySummary(path: parts.joined(separator: " › "), copied: copied, alreadyThere: alreadyThere)
+                DispatchQueue.main.async { completion(.success(summary)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
+    /// "Library/Oceania/Australia/Queensland/2026-11-08 Mount Barney" becomes "Oceania/Australia/Queensland/2026-11-08 Mount Barney".
+    static func pathInsideLibrary(_ folderPath: String) -> String {
+        let prefix = "Library/"
+        return folderPath.hasPrefix(prefix) ? String(folderPath.dropFirst(prefix.count)) : folderPath
+    }
+
+    static func isClip(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "mov"
+    }
+
+    static func fileSize(_ url: URL) -> Int? {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
+    }
+
     /// Packs a trip into one .zip at the top of the app's folder, keeping the
-    /// Library/<continent>/<country>/<state>/ folders inside it.
+    /// Shot Guide/<continent>/<country>/<state>/ folders inside it, the same as copying to a drive.
     func exportTrip(_ trip: Trip, completion: @escaping (Result<URL, Error>) -> Void) {
         let source = folderURL(for: trip)
-        let relative = trip.folderPath
+        let relative = Self.exportFolderName + "/" + Self.pathInsideLibrary(trip.folderPath)
         let destination = documents.appendingPathComponent(Self.safe(source.lastPathComponent) + ".zip")
         DispatchQueue.global(qos: .userInitiated).async {
             let fileManager = FileManager.default
@@ -179,7 +268,7 @@ final class TripStore: ObservableObject {
                         try fileManager.copyItem(at: item, to: target)
                     }
                 }
-                let root = staging.appendingPathComponent("Library", isDirectory: true)
+                let root = staging.appendingPathComponent(Self.exportFolderName, isDirectory: true)
                 var coordinatorError: NSError?
                 var copyError: Error?
                 NSFileCoordinator().coordinate(readingItemAt: root, options: [.forUploading], error: &coordinatorError) { zipURL in

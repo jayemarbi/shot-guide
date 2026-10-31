@@ -22,7 +22,9 @@ Apps signed with a free Apple ID stop opening after 7 days. Install the same fil
 
 ## Getting footage off the phone
 
-On a trip's page, tap **Export trip**. Then plug into the PC and open iTunes (the version from Apple's website, which Sideloadly needs anyway). Click the phone button near the top left, then **File Sharing** › Shot Guide, select the `.zip` and click **Save to**. If you use the Apple Devices app instead, it's under Files › Shot Guide.
+**With an SSD (the main way).** Plug the SSD into the iPhone. On a trip's page, tap **Export trip** › **Copy to SSD or folder**, and choose the SSD. The trip goes into `Shot Guide/<continent>/<country>/<state>/<date> <place>/` beside the trips already there, with its `catalog.csv` and `trip.json`. Clips already on the drive are skipped, so copying a trip again only adds new takes. The SSD needs to be formatted exFAT (or APFS) for the iPhone to write to it, and exFAT also works on Windows.
+
+**Without the SSD.** **Export trip** › **Make a .zip file** packs the trip into one file with the same `Shot Guide/...` folders inside. Copy it to the PC with iTunes (phone button near the top left › **File Sharing** › Shot Guide › **Save to**), or the Apple Devices app (Files › Shot Guide), or share it by AirDrop. Unzip it in the folder that holds your `Shot Guide` folder and it slots in beside the other trips.
 
 ## Code map
 

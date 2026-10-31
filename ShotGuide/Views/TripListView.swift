@@ -65,7 +65,7 @@ struct TripListView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { trip in
-                Text("\(trip.place) and its clips will be removed from this phone. Copy them to your PC first.")
+                Text("\(trip.place) and its clips will be removed from this phone. Copy them to your SSD or PC first.")
             }
         }
     }

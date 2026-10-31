@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct TripView: View {
     let tripID: UUID
@@ -10,6 +11,9 @@ struct TripView: View {
     @State private var exportedFile: SharedFile? = nil
     @State private var sharing: SharedFile? = nil
     @State private var exportError: String? = nil
+    @State private var pickingFolder = false
+    @State private var copyProgress: String? = nil
+    @State private var copiedMessage: String? = nil
 
     var body: some View {
         Group {
@@ -31,6 +35,13 @@ struct TripView: View {
                         .foregroundStyle(.secondary)
                 }
                 .font(.subheadline)
+                if let copyProgress {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text(copyProgress)
+                            .font(.subheadline)
+                    }
+                }
             }
 
             Section("Do first") {
@@ -57,7 +68,7 @@ struct TripView: View {
                 } header: {
                     Text("Clips")
                 } footer: {
-                    Text("Tap a clip to tag it or star it. Export trip packs everything into one file for your PC.")
+                    Text("Tap a clip to tag it or star it. Export trip copies everything to your SSD, sorted into continent, country and state folders.")
                 }
             }
         }
@@ -67,14 +78,39 @@ struct TripView: View {
                 if exporting {
                     ProgressView()
                 } else {
-                    Button {
-                        export(trip)
+                    Menu {
+                        Button {
+                            pickingFolder = true
+                        } label: {
+                            Label("Copy to SSD or folder", systemImage: "externaldrive")
+                        }
+                        Button {
+                            export(trip)
+                        } label: {
+                            Label("Make a .zip file", systemImage: "doc.zipper")
+                        }
                     } label: {
                         Label("Export trip", systemImage: "square.and.arrow.up")
                     }
                     .disabled(trip.clips.isEmpty)
                 }
             }
+        }
+        .fileImporter(isPresented: $pickingFolder, allowedContentTypes: [.folder]) { result in
+            switch result {
+            case .success(let folder):
+                copy(trip, to: folder)
+            case .failure(let error):
+                exportError = error.localizedDescription
+            }
+        }
+        .alert(
+            "Trip copied",
+            isPresented: Binding(get: { copiedMessage != nil }, set: { if !$0 { copiedMessage = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(copiedMessage ?? "")
         }
         .fullScreenCover(item: $activeShot) { shot in
             ShotCameraView(tripID: tripID, shot: shot)
@@ -149,6 +185,40 @@ struct TripView: View {
                 exportError = error.localizedDescription
             }
         }
+    }
+
+    private func copy(_ trip: Trip, to folder: URL) {
+        exporting = true
+        copyProgress = "Getting ready to copy…"
+        store.copyTrip(trip, to: folder, progress: { done, total in
+            copyProgress = "Copying \(done) of \(total) files to \(folder.lastPathComponent)…"
+        }, completion: { result in
+            exporting = false
+            copyProgress = nil
+            switch result {
+            case .success(let summary):
+                copiedMessage = Self.copiedText(summary)
+            case .failure(let error):
+                exportError = error.localizedDescription
+                    + "\n\nCheck the SSD is plugged in and has space, then copy again. Clips that made it across won't be copied twice."
+            }
+        })
+    }
+
+    private static func copiedText(_ summary: TripStore.CopySummary) -> String {
+        func clips(_ count: Int) -> String {
+            count == 1 ? "1 clip" : "\(count) clips"
+        }
+        let first: String
+        if summary.copied == 0 {
+            first = "Nothing new to copy: the clips were already on the drive, so only the catalogue was updated."
+        } else if summary.alreadyThere == 0 {
+            first = "\(clips(summary.copied)) copied."
+        } else {
+            let verb = summary.alreadyThere == 1 ? "was" : "were"
+            first = "\(clips(summary.copied)) copied. \(clips(summary.alreadyThere)) already on the drive \(verb) skipped."
+        }
+        return first + " They're in \(summary.path).\n\nOnce you've checked them on the drive, you can delete the trip from your phone to free up space."
     }
 }
 
