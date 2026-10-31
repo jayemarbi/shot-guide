@@ -104,6 +104,14 @@ enum TripPhase: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The trip facts row sits at the end of Leaving, when you know how the day went.
+    var showsTripFacts: Bool {
+        switch self {
+        case .leaving: return true
+        default: return false
+        }
+    }
+
     static var allSlots: [ShotSlot] {
         allCases.flatMap { $0.slots }
     }

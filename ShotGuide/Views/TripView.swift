@@ -22,113 +22,34 @@ struct TripView: View {
     @State private var showFacts = false
 
     var body: some View {
-        Group {
-            if let trip = store.trip(id: tripID) {
-                content(for: trip)
-            } else {
-                Text("This trip couldn't be found.")
-                    .foregroundStyle(.secondary)
-            }
+        alerts(sheets(page))
+    }
+
+    // The page is built from small pieces so the compiler can type-check each one quickly.
+
+    @ViewBuilder
+    private var page: some View {
+        if let trip = store.trip(id: tripID) {
+            content(for: trip)
+        } else {
+            Text("This trip couldn't be found.")
+                .foregroundStyle(.secondary)
         }
     }
 
     private func content(for trip: Trip) -> some View {
         List {
-            Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text([trip.regionLine, trip.continent].filter { !$0.isEmpty }.joined(separator: " · "))
-                    Text("\(trip.doneTotal) of \(trip.targetTotal) clips")
-                        .foregroundStyle(.secondary)
-                    if store.spaceLeftText != nil {
-                        spaceLine()
-                    }
-                }
-                .font(.subheadline)
-                if let copyProgress {
-                    HStack(spacing: 12) {
-                        ProgressView()
-                        Text(copyProgress)
-                            .font(.subheadline)
-                    }
-                }
-                // The light right now, so you know when to save the shots worth taking your time over.
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Label(lightLine(for: trip, at: context.date) ?? "Sunrise and sunset times show up once your location is found.",
-                          systemImage: "sun.horizon.fill")
-                        .font(.subheadline)
-                        .foregroundStyle(Color.orange)
-                }
-                if trip.clips.isEmpty {
-                    Label("Before your first shot, wipe your lens. A smudge softens every shot.", systemImage: "sparkles")
-                        .font(.subheadline)
-                }
-            }
-
+            headerSection(trip)
             ForEach(TripPhase.allCases) { phase in
-                Section {
-                    ForEach(phase.slots) { slot in
-                        slotRow(slot, trip: trip)
-                    }
-                    if phase == .leaving {
-                        factsRow(trip)
-                    }
-                } header: {
-                    Text(phase.title)
-                } footer: {
-                    Text(phase.footer)
-                }
+                phaseSection(phase, trip: trip)
             }
-
-            Section {
-                PhotosPicker(selection: $pickedItems, matching: .any(of: [.videos, .images]), preferredItemEncoding: .current) {
-                    Label("Add from Photos", systemImage: "photo.on.rectangle.angled")
-                }
-                .disabled(exporting)
-            } header: {
-                Text("From other cameras")
-            } footer: {
-                Text("Star time-lapses, Cinematic mode, drone or GoPro clips and photos. They're named, tagged and copied to your SSD like the rest.")
-            }
-
-            if !trip.clips.isEmpty {
-                Section {
-                    ForEach(trip.clips.sorted { $0.recordedAt > $1.recordedAt }) { clip in
-                        Button {
-                            selectedClip = clip
-                        } label: {
-                            ClipRow(clip: clip)
-                        }
-                    }
-                } header: {
-                    Text("Clips")
-                } footer: {
-                    Text("Tap a clip to tag it or star it. Export trip makes cutouts and captions for editing, then copies everything "
-                        + "to your SSD, sorted into continent, country and state folders. Keep the app open while it works.")
-                }
-            }
+            importSection
+            clipsSection(trip)
         }
         .navigationTitle(trip.place)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                if exporting {
-                    ProgressView()
-                } else {
-                    Menu {
-                        Button {
-                            pickingFolder = true
-                        } label: {
-                            Label("Copy to SSD or folder", systemImage: "externaldrive")
-                        }
-                        Button {
-                            export(trip)
-                        } label: {
-                            Label("Make a .zip file", systemImage: "doc.zipper")
-                        }
-                    } label: {
-                        Label("Export trip", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(trip.clips.isEmpty)
-                }
+                exportButton(trip)
             }
         }
         .fileImporter(isPresented: $pickingFolder, allowedContentTypes: [.folder]) { result in
@@ -139,63 +60,190 @@ struct TripView: View {
                 exportError = error.localizedDescription
             }
         }
-        .alert(
-            "Trip copied",
-            isPresented: Binding(get: { copiedMessage != nil }, set: { if !$0 { copiedMessage = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(copiedMessage ?? "")
-        }
         .fullScreenCover(item: $activeSlot) { slot in
-            if slot.shot == .voiceover {
-                VoiceoverView(tripID: tripID)
-            } else {
-                ShotCameraView(tripID: tripID, shot: slot.shot, fixedVariant: slot.half)
+            shotScreen(slot)
+        }
+    }
+
+    @ViewBuilder
+    private func shotScreen(_ slot: ShotSlot) -> some View {
+        if slot.shot == .voiceover {
+            VoiceoverView(tripID: tripID)
+        } else {
+            ShotCameraView(tripID: tripID, shot: slot.shot, fixedVariant: slot.half)
+        }
+    }
+
+    @ViewBuilder
+    private func exportButton(_ trip: Trip) -> some View {
+        if exporting {
+            ProgressView()
+        } else {
+            Menu {
+                Button {
+                    pickingFolder = true
+                } label: {
+                    Label("Copy to SSD or folder", systemImage: "externaldrive")
+                }
+                Button {
+                    export(trip)
+                } label: {
+                    Label("Make a .zip file", systemImage: "doc.zipper")
+                }
+            } label: {
+                Label("Export trip", systemImage: "square.and.arrow.up")
+            }
+            .disabled(trip.clips.isEmpty)
+        }
+    }
+
+    private func headerSection(_ trip: Trip) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(regionText(trip))
+                Text("\(trip.doneTotal) of \(trip.targetTotal) clips")
+                    .foregroundStyle(.secondary)
+                if store.spaceLeftText != nil {
+                    spaceLine()
+                }
+            }
+            .font(.subheadline)
+            if let copyProgress {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text(copyProgress)
+                        .font(.subheadline)
+                }
+            }
+            lightRow(trip)
+            if trip.clips.isEmpty {
+                Label("Before your first shot, wipe your lens. A smudge softens every shot.", systemImage: "sparkles")
+                    .font(.subheadline)
             }
         }
-        .sheet(isPresented: $showFacts) {
-            TripFactsView(tripID: tripID)
+    }
+
+    private func regionText(_ trip: Trip) -> String {
+        [trip.regionLine, trip.continent].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The light right now, so you know when to save the shots worth taking your time over.
+    private func lightRow(_ trip: Trip) -> some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let line: String = lightLine(for: trip, at: context.date)
+                ?? "Sunrise and sunset times show up once your location is found."
+            Label(line, systemImage: "sun.horizon.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.orange)
         }
-        .onChange(of: pickedItems) { _, items in
-            guard !items.isEmpty else { return }
-            importItems(items)
-        }
-        .alert(
-            "Added from Photos",
-            isPresented: Binding(get: { importMessage != nil }, set: { if !$0 { importMessage = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(importMessage ?? "")
-        }
-        .sheet(item: $selectedClip) { clip in
-            ReviewView(tripID: tripID, clipID: clip.id, autoplay: false, preselectSuggestions: false, title: "Clip")
-        }
-        .sheet(item: $sharing) { file in
-            ShareSheet(items: [file.url])
-        }
-        .alert(
-            "Trip exported",
-            isPresented: Binding(get: { exportedFile != nil }, set: { if !$0 { exportedFile = nil } }),
-            presenting: exportedFile
-        ) { file in
-            Button("Share…") {
-                exportedFile = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { sharing = file }
+    }
+
+    private func phaseSection(_ phase: TripPhase, trip: Trip) -> some View {
+        Section {
+            ForEach(phase.slots) { slot in
+                slotRow(slot, trip: trip)
             }
-            Button("OK", role: .cancel) {}
-        } message: { file in
-            Text("\(file.url.lastPathComponent) is in the Shot Guide folder. Plug into your PC, open iTunes, click the phone button, then File Sharing › Shot Guide, and save it. (In the Apple Devices app it's Files › Shot Guide.) Delete it from the phone afterwards to free up space.")
+            if phase.showsTripFacts {
+                factsRow(trip)
+            }
+        } header: {
+            Text(phase.title)
+        } footer: {
+            Text(phase.footer)
         }
-        .alert(
-            "Export didn't work",
-            isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(exportError ?? "")
+    }
+
+    private var importSection: some View {
+        Section {
+            PhotosPicker(selection: $pickedItems, matching: .any(of: [.videos, .images]), preferredItemEncoding: .current) {
+                Label("Add from Photos", systemImage: "photo.on.rectangle.angled")
+            }
+            .disabled(exporting)
+        } header: {
+            Text("From other cameras")
+        } footer: {
+            Text("Star time-lapses, Cinematic mode, drone or GoPro clips and photos. They're named, tagged and copied to your SSD like the rest.")
         }
+    }
+
+    @ViewBuilder
+    private func clipsSection(_ trip: Trip) -> some View {
+        if !trip.clips.isEmpty {
+            Section {
+                ForEach(trip.clips.sorted { $0.recordedAt > $1.recordedAt }) { clip in
+                    Button {
+                        selectedClip = clip
+                    } label: {
+                        ClipRow(clip: clip)
+                    }
+                }
+            } header: {
+                Text("Clips")
+            } footer: {
+                Text("Tap a clip to tag it or star it. Export trip makes cutouts and captions for editing, then copies everything "
+                    + "to your SSD, sorted into continent, country and state folders. Keep the app open while it works.")
+            }
+        }
+    }
+
+    private func sheets<Page: View>(_ view: Page) -> some View {
+        view
+            .sheet(isPresented: $showFacts) {
+                TripFactsView(tripID: tripID)
+            }
+            .sheet(item: $selectedClip) { clip in
+                ReviewView(tripID: tripID, clipID: clip.id, autoplay: false, preselectSuggestions: false, title: "Clip")
+            }
+            .sheet(item: $sharing) { file in
+                ShareSheet(items: [file.url])
+            }
+            .onChange(of: pickedItems) { _, items in
+                guard !items.isEmpty else { return }
+                importItems(items)
+            }
+    }
+
+    /// Shows a message while `text` is set, and clears it when the alert closes.
+    private func showing(_ text: Binding<String?>) -> Binding<Bool> {
+        Binding(get: { text.wrappedValue != nil }, set: { if !$0 { text.wrappedValue = nil } })
+    }
+
+    private func alerts<Page: View>(_ view: Page) -> some View {
+        view
+            .alert("Trip copied", isPresented: showing($copiedMessage)) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(copiedMessage ?? "")
+            }
+            .alert("Added from Photos", isPresented: showing($importMessage)) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importMessage ?? "")
+            }
+            .alert("Export didn't work", isPresented: showing($exportError)) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(exportError ?? "")
+            }
+            .alert(
+                "Trip exported",
+                isPresented: Binding(get: { exportedFile != nil }, set: { if !$0 { exportedFile = nil } }),
+                presenting: exportedFile
+            ) { file in
+                Button("Share…") {
+                    exportedFile = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { sharing = file }
+                }
+                Button("OK", role: .cancel) {}
+            } message: { file in
+                Text(Self.exportedText(file))
+            }
+    }
+
+    private static func exportedText(_ file: SharedFile) -> String {
+        "\(file.url.lastPathComponent) is in the Shot Guide folder. Plug into your PC, open iTunes, click the phone button, "
+            + "then File Sharing › Shot Guide, and save it. (In the Apple Devices app it's Files › Shot Guide.) "
+            + "Delete it from the phone afterwards to free up space."
     }
 
     /// "Golden hour starts at 5:41 pm, sunset at 6:12 pm", from where you are now (or where the trip started).
@@ -215,6 +263,8 @@ struct TripView: View {
         return Text(text).foregroundStyle(colour)
     }
 
+    private static let factsHint = "Distance, time, cost, tips: for on-screen text and guide reels"
+
     private func factsRow(_ trip: Trip) -> some View {
         let summary = trip.facts?.summary ?? ""
         return Button {
@@ -227,7 +277,7 @@ struct TripView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("TRIP FACTS")
                         .font(.headline)
-                    Text(summary.isEmpty ? "Distance, time, cost, tips: for on-screen text and guide reels" : summary)
+                    Text(summary.isEmpty ? Self.factsHint : summary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
