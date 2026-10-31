@@ -78,6 +78,11 @@ enum MaskMaker {
                 started = true
             }
             while !input.isReadyForMoreMediaData {
+                if writer.status == .failed {
+                    reader.cancelReading()
+                    try? FileManager.default.removeItem(at: maskURL)
+                    throw writer.error ?? MaskError.cannotWrite
+                }
                 try await Task.sleep(nanoseconds: 2_000_000)
             }
             guard let pool = adaptor.pixelBufferPool else { throw MaskError.cannotWrite }

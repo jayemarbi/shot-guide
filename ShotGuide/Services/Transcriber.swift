@@ -8,6 +8,18 @@ enum Transcriber {
         let srt: String
     }
 
+    enum TranscribeError: Error {
+        /// No offline speech recognition right now (e.g. the language isn't downloaded). Worth trying again later.
+        case unavailable
+        case failed
+    }
+
+    private enum Outcome {
+        case heard(SFTranscription)
+        case noSpeech
+        case failed
+    }
+
     static func requestPermission() async -> Bool {
         if SFSpeechRecognizer.authorizationStatus() == .authorized {
             return true
@@ -19,12 +31,12 @@ enum Transcriber {
         }
     }
 
-    /// Returns nil when the clip has no speech in it. Throws if the clip couldn't be read.
+    /// Returns nil when the clip has no speech in it. Throws when it couldn't be checked, so it's tried again next time.
     static func transcribe(_ clipURL: URL) async throws -> Result? {
         let locales = [Locale.current, Locale(identifier: "en-AU"), Locale(identifier: "en-US")]
         let recognizers = locales.compactMap { SFSpeechRecognizer(locale: $0) }
         guard let recognizer = recognizers.first(where: { $0.supportsOnDeviceRecognition && $0.isAvailable }) else {
-            return nil
+            throw TranscribeError.unavailable
         }
 
         let asset = AVURLAsset(url: clipURL)
@@ -46,23 +58,31 @@ enum Transcriber {
         request.shouldReportPartialResults = false
         request.addsPunctuation = true
 
-        let transcription: SFTranscription? = await withCheckedContinuation { continuation in
+        let outcome: Outcome = await withCheckedContinuation { continuation in
             var finished = false
             _ = recognizer.recognitionTask(with: request) { result, error in
                 guard !finished else { return }
                 if let result, result.isFinal {
                     finished = true
-                    continuation.resume(returning: result.bestTranscription)
-                } else if error != nil {
-                    // "No speech detected" arrives as an error too.
+                    continuation.resume(returning: .heard(result.bestTranscription))
+                } else if let error {
                     finished = true
-                    continuation.resume(returning: nil)
+                    // "No speech detected" (code 1110) arrives as an error; anything else is a real failure.
+                    let nsError = error as NSError
+                    let noSpeech = nsError.code == 1110 || nsError.localizedDescription.localizedCaseInsensitiveContains("no speech")
+                    continuation.resume(returning: noSpeech ? .noSpeech : .failed)
                 }
             }
         }
 
-        guard let transcription else {
+        let transcription: SFTranscription
+        switch outcome {
+        case .heard(let heard):
+            transcription = heard
+        case .noSpeech:
             return nil
+        case .failed:
+            throw TranscribeError.failed
         }
         let text = transcription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
