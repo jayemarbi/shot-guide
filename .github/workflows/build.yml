@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Write access lets the last step put the finished app on the "builds" branch.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-26
@@ -43,14 +47,46 @@ jobs:
           zip -qry ShotGuide.ipa Payload
           ls -lh ShotGuide.ipa
 
+      - name: Describe the app
+        run: |
+          APP=Payload/ShotGuide.app
+          {
+            echo "commit: $GITHUB_SHA"
+            xcodebuild -version
+            echo
+            ls -la "$APP"
+            echo
+            lipo -info "$APP/ShotGuide"
+            echo
+            plutil -p "$APP/Info.plist"
+          } > build-info.txt 2>&1
+          cat build-info.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: ShotGuide-ipa
           path: ShotGuide.ipa
 
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: xcodebuild.log
-          if-no-files-found: ignore
+      # The newest app, its details and any build errors always sit on the "builds" branch,
+      # so the app can be downloaded from github.com/<owner>/shot-guide/raw/builds/ShotGuide.ipa.
+      - name: Publish to the builds branch
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          cp ShotGuide.ipa out/ 2>/dev/null || true
+          cp build-info.txt out/ 2>/dev/null || true
+          if [ -f xcodebuild.log ]; then
+            grep -E "error:|warning:" xcodebuild.log | sort -u > out/build-problems.txt || true
+            tail -300 xcodebuild.log > out/build-log-tail.txt
+          fi
+          echo "$JOB_STATUS $GITHUB_SHA $(date -u +%Y-%m-%dT%H:%M:%SZ)" > out/STATUS.txt
+          cd out
+          git init -q -b builds
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Build of ${GITHUB_SHA::7}: $JOB_STATUS"
+          git push -qf "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" builds

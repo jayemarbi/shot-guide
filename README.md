@@ -10,7 +10,9 @@ There's no Mac involved. Every push to `main` runs `.github/workflows/build.yml`
 
 1. XcodeGen turns `project.yml` into an Xcode project.
 2. Xcode builds the app without signing it.
-3. The workflow packs `ShotGuide.ipa` and attaches it to the run as an artifact.
+3. The workflow packs `ShotGuide.ipa` and puts it on the `builds` branch, along with the app's details and any build errors.
+
+The newest app is always at <https://github.com/jayemarbi/shot-guide/raw/builds/ShotGuide.ipa>.
 
 ## Installing it (free Apple ID)
 
