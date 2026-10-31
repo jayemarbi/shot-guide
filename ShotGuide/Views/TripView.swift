@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct TripView: View {
@@ -45,15 +46,26 @@ struct TripView: View {
             }
 
             Section("Do first") {
-                ForEach(ShotType.allCases.filter { $0.doFirst }) { shot in
+                ForEach(ShotType.allCases.filter { $0.section == .doFirst }) { shot in
                     shotRow(shot, trip: trip)
                 }
             }
 
             Section("Any order") {
-                ForEach(ShotType.allCases.filter { !$0.doFirst }) { shot in
+                ForEach(ShotType.allCases.filter { $0.section == .anyOrder }) { shot in
                     shotRow(shot, trip: trip)
                 }
+            }
+
+            Section {
+                ForEach(ShotType.allCases.filter { $0.section == .transitions }) { shot in
+                    shotRow(shot, trip: trip)
+                }
+            } header: {
+                Text("Transitions")
+            } footer: {
+                Text("Film the Out half as you leave a place and the In half at the next one, moving the same way in both. "
+                    + "BODY WIPE and WHIP are extras, so they don't count towards the total.")
             }
 
             if !trip.clips.isEmpty {
@@ -68,7 +80,8 @@ struct TripView: View {
                 } header: {
                     Text("Clips")
                 } footer: {
-                    Text("Tap a clip to tag it or star it. Export trip copies everything to your SSD, sorted into continent, country and state folders.")
+                    Text("Tap a clip to tag it or star it. Export trip makes cutouts and captions for editing, then copies everything "
+                        + "to your SSD, sorted into continent, country and state folders. Keep the app open while it works.")
                 }
             }
         }
@@ -174,35 +187,53 @@ struct TripView: View {
         .foregroundStyle(Color.primary)
     }
 
-    private func export(_ trip: Trip) {
+    /// Before a trip leaves the phone, make the cutouts and captions the editor needs. Clips already done are skipped.
+    private func startExport() {
         exporting = true
-        store.exportTrip(trip) { result in
-            exporting = false
-            switch result {
-            case .success(let url):
-                exportedFile = SharedFile(url: url)
-            case .failure(let error):
-                exportError = error.localizedDescription
+        copyProgress = "Getting ready…"
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+
+    private func endExport() {
+        exporting = false
+        copyProgress = nil
+        UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    private func export(_ trip: Trip) {
+        startExport()
+        Task { @MainActor in
+            await ClipPrep.prepare(tripID: tripID, store: store) { copyProgress = $0 }
+            copyProgress = "Packing the .zip file…"
+            store.exportTrip(store.trip(id: tripID) ?? trip) { result in
+                endExport()
+                switch result {
+                case .success(let url):
+                    exportedFile = SharedFile(url: url)
+                case .failure(let error):
+                    exportError = error.localizedDescription
+                }
             }
         }
     }
 
     private func copy(_ trip: Trip, to folder: URL) {
-        exporting = true
-        copyProgress = "Getting ready to copy…"
-        store.copyTrip(trip, to: folder, progress: { done, total in
-            copyProgress = "Copying \(done) of \(total) files to \(folder.lastPathComponent)…"
-        }, completion: { result in
-            exporting = false
-            copyProgress = nil
-            switch result {
-            case .success(let summary):
-                copiedMessage = Self.copiedText(summary)
-            case .failure(let error):
-                exportError = error.localizedDescription
-                    + "\n\nCheck the SSD is plugged in and has space, then copy again. Clips that made it across won't be copied twice."
-            }
-        })
+        startExport()
+        Task { @MainActor in
+            await ClipPrep.prepare(tripID: tripID, store: store) { copyProgress = $0 }
+            store.copyTrip(store.trip(id: tripID) ?? trip, to: folder, progress: { done, total in
+                copyProgress = "Copying \(done) of \(total) files to \(folder.lastPathComponent)…"
+            }, completion: { result in
+                endExport()
+                switch result {
+                case .success(let summary):
+                    copiedMessage = Self.copiedText(summary)
+                case .failure(let error):
+                    exportError = error.localizedDescription
+                        + "\n\nCheck the SSD is plugged in and has space, then copy again. Clips that made it across won't be copied twice."
+                }
+            })
+        }
     }
 
     private static func copiedText(_ summary: TripStore.CopySummary) -> String {

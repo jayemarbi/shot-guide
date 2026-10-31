@@ -147,7 +147,11 @@ final class TripStore: ObservableObject {
 
     func deleteClip(_ clipID: UUID, from tripID: UUID) {
         guard var trip = self.trip(id: tripID), let clip = trip.clips.first(where: { $0.id == clipID }) else { return }
-        try? FileManager.default.removeItem(at: folderURL(for: trip).appendingPathComponent(clip.fileName))
+        // The clip, plus its cutout mask and captions if it has them.
+        let folder = folderURL(for: trip)
+        for name in [clip.fileName, clip.maskFileName, clip.captionsFileName].compactMap({ $0 }) {
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+        }
         trip.clips.removeAll { $0.id == clipID }
         replace(trip)
     }
@@ -192,15 +196,15 @@ final class TripStore: ObservableObject {
                 let target = root.appendingPathComponent(inside, isDirectory: true)
                 try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
 
-                // Clips first and the catalogue last, so the catalogue on the drive never lists a missing clip.
+                // Videos first and the catalogue last, so the catalogue on the drive never lists a missing clip.
                 let items = try fileManager.contentsOfDirectory(
                     at: source, includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey], options: [.skipsHiddenFiles])
                     .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true }
                     .sorted { lhs, rhs in
-                        let lhsClip = Self.isClip(lhs)
-                        let rhsClip = Self.isClip(rhs)
-                        if lhsClip != rhsClip {
-                            return lhsClip
+                        let lhsVideo = Self.isVideo(lhs)
+                        let rhsVideo = Self.isVideo(rhs)
+                        if lhsVideo != rhsVideo {
+                            return lhsVideo
                         }
                         return lhs.lastPathComponent < rhs.lastPathComponent
                     }
@@ -211,9 +215,11 @@ final class TripStore: ObservableObject {
                     DispatchQueue.main.async { progress(index + 1, items.count) }
                     let copy = target.appendingPathComponent(item.lastPathComponent)
                     if fileManager.fileExists(atPath: copy.path) {
-                        // A clip of the same size is already there. A different size means an earlier copy was cut short.
-                        if Self.isClip(item), Self.fileSize(item) == Self.fileSize(copy) {
-                            alreadyThere += 1
+                        // A video of the same size is already there. A different size means an earlier copy was cut short.
+                        if Self.isVideo(item), Self.fileSize(item) == Self.fileSize(copy) {
+                            if Self.isClip(item) {
+                                alreadyThere += 1
+                            }
                             continue
                         }
                         try fileManager.removeItem(at: copy)
@@ -239,8 +245,13 @@ final class TripStore: ObservableObject {
         return folderPath.hasPrefix(prefix) ? String(folderPath.dropFirst(prefix.count)) : folderPath
     }
 
-    static func isClip(_ url: URL) -> Bool {
+    static func isVideo(_ url: URL) -> Bool {
         url.pathExtension.lowercased() == "mov"
+    }
+
+    /// A clip you filmed, as opposed to a cutout mask made from one.
+    static func isClip(_ url: URL) -> Bool {
+        isVideo(url) && !url.lastPathComponent.hasSuffix("_mask.mov")
     }
 
     static func fileSize(_ url: URL) -> Int? {
@@ -341,7 +352,8 @@ final class TripStore: ObservableObject {
 
     static let catalogColumns = [
         "file", "place", "state", "country", "continent", "latitude", "longitude", "date", "time", "light",
-        "shot", "take", "in_shot", "lens", "fps", "resolution", "length_s", "tags", "favourite", "notes"
+        "shot", "take", "in_shot", "lens", "fps", "resolution", "length_s", "tags", "favourite", "notes",
+        "variant", "mask_file", "captions_file", "transcript"
     ]
 
     static func catalogCSV(for trip: Trip) -> String {
@@ -368,7 +380,11 @@ final class TripStore: ObservableObject {
                 String(format: "%.1f", clip.durationSeconds),
                 clip.tags.joined(separator: "; "),
                 clip.favourite ? "yes" : "no",
-                clip.notes
+                clip.notes,
+                clip.variant ?? "",
+                clip.maskFileName ?? "",
+                clip.captionsFileName ?? "",
+                clip.transcript ?? ""
             ]
             lines.append(row.map { csvField($0) }.joined(separator: ","))
         }

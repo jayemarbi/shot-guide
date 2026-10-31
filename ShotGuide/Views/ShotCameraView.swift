@@ -375,6 +375,14 @@ struct ShotCameraView: View {
                                 .background(Color.white.opacity(0.12), in: Circle())
                         }
                     }
+                    if !shot.variants.isEmpty {
+                        Picker("Version", selection: $variant) {
+                            ForEach(shot.variants.indices, id: \.self) { index in
+                                Text(shot.variants[index]).tag(index)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     Text(plan.before)
                         .foregroundStyle(Color.white.opacity(0.8))
                     VStack(alignment: .leading, spacing: 10) {

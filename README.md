@@ -1,6 +1,6 @@
 # Shot Guide
 
-An iPhone app for filming the jodyseescoolstuff shot list. Start a trip at a place, pick any of the 13 shots, and the camera opens with that shot's settings. Phone-in-hand shots show live prompts while you record; shots with you in them show a timeline first, count you in with the flash, keep the screen clean and replay the take straight after.
+An iPhone app for filming the jodyseescoolstuff shot list. Start a trip at a place, pick any of the 15 shots (including the BODY WIPE and WHIP transition extras), and the camera opens with that shot's settings. Phone-in-hand shots show live prompts while you record; shots with you in them show a timeline first, count you in with the flash, keep the screen clean and replay the take straight after.
 
 Every clip is saved already named (`Place_YYYY-MM-DD_SHOT_##.mov`), filed under `Library/<continent>/<country>/<state>/<date> <place>/`, and listed in that trip's `catalog.csv` with its location, light, camera settings and tags.
 
@@ -23,6 +23,8 @@ The newest app is always at <https://github.com/jayemarbi/shot-guide/raw/builds/
 Apps signed with a free Apple ID stop opening after 7 days. Install the same file again over the top; trips and clips stay. Deleting the app deletes its clips, so copy trips to the PC first.
 
 ## Getting footage off the phone
+
+Both ways first get the clips ready for editing, on the phone, once per clip: a cutout mask (`<clip>_mask.mov`, white where you are) for every shot you're in, and captions (`<clip>.srt`, plus the text in the catalogue) for TALK, REACTION and SECOND ANGLE. Keep the app open while that runs.
 
 **With an SSD (the main way).** Plug the SSD into the iPhone. On a trip's page, tap **Export trip** › **Copy to SSD or folder**, and choose the SSD. The trip goes into `Shot Guide/<continent>/<country>/<state>/<date> <place>/` beside the trips already there, with its `catalog.csv` and `trip.json`. Clips already on the drive are skipped, so copying a trip again only adds new takes. The SSD needs to be formatted exFAT (or APFS) for the iPhone to write to it, and exFAT also works on Windows.
 

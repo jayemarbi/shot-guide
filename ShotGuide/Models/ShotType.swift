@@ -68,6 +68,13 @@ struct ShotPlan {
     }
 }
 
+/// Where a shot sits on the trip page.
+enum ShotSection {
+    case doFirst
+    case anyOrder
+    case transitions
+}
+
 enum ShotType: String, CaseIterable, Codable, Identifiable {
     case reaction = "REACTION"
     case reveal = "REVEAL"
@@ -82,14 +89,22 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case slomo = "SLOMO"
     case transition = "TRANSITION"
     case secondAngle = "SECONDANGLE"
+    case bodyWipe = "BODYWIPE"
+    case whip = "WHIP"
 
     var id: String { rawValue }
 
-    var title: String { self == .secondAngle ? "SECOND ANGLE" : rawValue }
+    var title: String {
+        switch self {
+        case .secondAngle: return "SECOND ANGLE"
+        case .bodyWipe: return "BODY WIPE"
+        default: return rawValue
+        }
+    }
 
     var targetTakes: Int {
         switch self {
-        case .reveal, .wide, .walkaway, .transition: return 2
+        case .reveal, .wide, .walkaway, .transition, .bodyWipe, .whip: return 2
         case .detail, .talk: return 3
         default: return 1
         }
@@ -98,9 +113,20 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// Worth getting in the first two minutes at a new place.
     var doFirst: Bool { self == .reaction || self == .reveal || self == .timelapse }
 
+    var section: ShotSection {
+        if doFirst { return .doFirst }
+        switch self {
+        case .transition, .bodyWipe, .whip: return .transitions
+        default: return .anyOrder
+        }
+    }
+
+    /// BODY WIPE and WHIP are extras, so they don't count towards a trip's total.
+    var countsTowardTotal: Bool { self != .bodyWipe && self != .whip }
+
     var defaultGroup: ShotGroup {
         switch self {
-        case .reaction, .timelapse, .walkaway, .tele, .talk, .secondAngle: return .inShot
+        case .reaction, .timelapse, .walkaway, .tele, .talk, .secondAngle, .bodyWipe: return .inShot
         default: return .inHand
         }
     }
@@ -111,13 +137,14 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     var variants: [String] {
         switch self {
         case .reveal: return ["Auto zoom", "Walk reveal"]
-        case .transition: return ["Out", "In"]
+        case .transition, .bodyWipe, .whip: return ["Out", "In"]
         default: return []
         }
     }
 
+    /// Transitions alternate: odd takes are the Out half, even takes the In half.
     func defaultVariant(forTake take: Int) -> Int {
-        if self == .transition { return take % 2 == 0 ? 1 : 0 }
+        if section == .transitions { return take % 2 == 0 ? 1 : 0 }
         return 0
     }
 
@@ -136,6 +163,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .slomo: return "Water, waves or a jump in slow motion"
         case .transition: return "Cover and uncover the lens"
         case .secondAngle: return "You getting the hero shot"
+        case .bodyWipe: return "Walk past the lens into the next place"
+        case .whip: return "Whip pan from one place to the next"
         }
     }
 
@@ -362,6 +391,57 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 35, end: 45, text: "Walk back and check it."),
                     GuideStep(start: 45, end: nil, text: "Stop when you're done.")
                 ])
+
+        case .bodyWipe:
+            if variantIndex == 0 {
+                return ShotPlan(
+                    shot: self, take: take, group: .inShot,
+                    lens: .wide, fps: 30, stabilisation: .off,
+                    autoStop: 6, countdown: 5,
+                    before: "This one ends a place. Tripod at chest height, right beside your path. "
+                        + "Walk left to right, brushing past the lens so you fill the frame.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Scene only. You're just out of shot on the left."),
+                        GuideStep(start: 2, end: 4, text: "Walk left to right, close past the lens, filling the frame."),
+                        GuideStep(start: 4, end: 6, text: "Keep going until you're out of shot.")
+                    ],
+                    variantName: variantName)
+            }
+            return ShotPlan(
+                shot: self, take: take, group: .inShot,
+                lens: .wide, fps: 30, stabilisation: .off,
+                autoStop: 6, countdown: 5,
+                before: "This one starts the next place. Walk the same way as the Out half: left to right.",
+                steps: [
+                    GuideStep(start: 0, end: 1, text: "Stand right in front of the lens, filling the frame."),
+                    GuideStep(start: 1, end: 3, text: "Walk off to the right, revealing the scene."),
+                    GuideStep(start: 3, end: 6, text: "Keep walking into the scene, or out of shot.")
+                ],
+                variantName: variantName)
+
+        case .whip:
+            if variantIndex == 0 {
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .off,
+                    autoStop: 3,
+                    before: "This one ends a place. Hold on the scene, then whip the phone hard to the right.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Hold on the scene."),
+                        GuideStep(start: 2, end: 3, text: "Whip fast to the right!")
+                    ],
+                    variantName: variantName)
+            }
+            return ShotPlan(
+                shot: self, take: take, group: .inHand,
+                lens: .wide, fps: 30, stabilisation: .off,
+                autoStop: 3,
+                before: "This one starts the next place. Point left of the scene, then whip right, same as the Out half.",
+                steps: [
+                    GuideStep(start: 0, end: 1, text: "Whip fast to the right and land on the scene."),
+                    GuideStep(start: 1, end: 3, text: "Hold steady.")
+                ],
+                variantName: variantName)
         }
     }
 }

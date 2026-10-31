@@ -19,6 +19,12 @@ struct Clip: Codable, Identifiable, Hashable {
     var tags: [String]
     var favourite: Bool
     var notes: String
+    /// A black-and-white video of where you are in each frame, for cutout effects. Made when the trip is copied.
+    var maskFileName: String? = nil
+    /// Subtitles (.srt) of what you said, made when the trip is copied.
+    var captionsFileName: String? = nil
+    /// What you said, as text. Empty once a clip has been checked and had no speech.
+    var transcript: String? = nil
 
     var shotType: ShotType? { ShotType(rawValue: shot) }
 }
@@ -51,10 +57,10 @@ struct Trip: Codable, Identifiable, Hashable {
     }
 
     var targetTotal: Int {
-        ShotType.allCases.reduce(0) { $0 + $1.targetTakes }
+        ShotType.allCases.filter { $0.countsTowardTotal }.reduce(0) { $0 + $1.targetTakes }
     }
 
     var doneTotal: Int {
-        ShotType.allCases.reduce(0) { $0 + min(takeCount(of: $1), $1.targetTakes) }
+        ShotType.allCases.filter { $0.countsTowardTotal }.reduce(0) { $0 + min(takeCount(of: $1), $1.targetTakes) }
     }
 }
