@@ -8,9 +8,11 @@ The creative shots are MATCH CUT (a see-through still of your last one to line u
 
 DANCE plays a song in your AirPods (or on the speaker) while you dance or lip-sync. Songs come from a video, screen recording or audio file and are kept in On My iPhone › Shot Guide › Songs for every trip. The song starts during the countdown so the chosen point lands as recording starts: carry on from 10 seconds before where the last take ended, start from the top, or pick a point. Each clip logs the song and exactly where in it the clip starts (allowing for Bluetooth delay), and the song is copied into the trip folder (`SONG_<name>.m4a`) so it reaches the SSD for cutting to the beat.
 
+Clips record in Apple Log wherever the phone allows it (up to 60 fps; slow motion stays in the normal colour), which keeps the most for grading. The camera and review screens show the picture through a look, so it looks finished while you film: Standard (Apple Log made to look like the normal camera) or a .cube LUT added from Files with the Look button on the trips screen (kept in On My iPhone › Shot Guide › Looks). Diagonal stripes show where highlights are close to blowing out. White balance locks for each take, and takes at the same spot on the same lens (within 300 m and 15 minutes) share it, so they match. The review screen can save a graded copy to Photos for posting from your phone; the clip itself stays in Log. `tools/make_standard_look.py` makes the Standard look, and the editor uses the same file.
+
 After each take you can name the clip. The name box is filled in with the last name you used within 300 m, with recent names one tap away, and the name goes on the end of the file name. Still and slow shots get a take check for shake and tilt. While recording, Mark (or volume down) saves the moment's time with the clip. Shots that stop by themselves keep rolling 2 extra seconds for the edit. Movement shots film at 60 fps, dropping to 30 once the sun is down. Sound is recorded in stereo with wind noise reduction where the phone supports it. The camera warns when the phone is getting too hot or the battery is low for a long shot, and notifications come before golden hour, sunset and blue hour on a trip you're filming. VOICEOVER records sound only, for narration. Each trip has Trip facts (distance, time, cost, tips; saved as `facts.txt`), Add from Photos for clips and photos from other cameras (each can be given a shot type), and shows how many minutes of 4K fit in the space left. TALK, REACTION, SECOND ANGLE and VOICEOVER show which mic is recording. The trips screen shows when this install stops opening, in orange for the last 2 days.
 
-Every clip is saved already named (`Place_YYYY-MM-DD_SHOT_##_Name.mov`, where the place is the day's), filed under `Library/<continent>/<country>/<state>/<date> <place>/`, and listed in that trip's `catalog.csv` with its location, light, camera settings, tags, name, day, trip type and take check.
+Every clip is saved already named (`Place_YYYY-MM-DD_SHOT_##_Name.mov`, where the place is the day's), filed under `Library/<continent>/<country>/<state>/<date> <place>/`, and listed in that trip's `catalog.csv` with its location, light, camera settings, tags, name, day, trip type, take check, colour profile, white balance, ISO and shutter.
 
 ## How it's built
 
@@ -43,6 +45,6 @@ Both ways first get the clips ready for editing, on the phone, once per clip: a 
 | Folder | What's in it |
 | --- | --- |
 | `ShotGuide/Models` | The shots and their timelines, trip types and how they tune the list, trips, days and clips, tags, countries and states |
-| `ShotGuide/Services` | Saving trips and the catalogue, location, sun position and light alerts, tag suggestions, masks and captions, the install's expiry |
-| `ShotGuide/Camera` | Camera set-up per shot, recording, time-lapse, the live preview, the level and take check |
+| `ShotGuide/Services` | Saving trips and the catalogue, looks and graded copies, location, sun position and light alerts, tag suggestions, masks and captions, the install's expiry |
+| `ShotGuide/Camera` | Camera set-up per shot (Apple Log where possible), recording, time-lapse, the live preview through the look, the level and take check |
 | `ShotGuide/Views` | Trip list, new trip, days and trip types, shot list, camera screen, review, naming and tagging |

@@ -2,6 +2,7 @@ import AVFoundation
 import CoreImage
 import Metal
 import QuartzCore
+import SwiftUI
 import UIKit
 
 /// Shows Apple Log pictures through the look: the live camera (with stripes where highlights are close to
