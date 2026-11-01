@@ -7,6 +7,7 @@ struct ShotGuideApp: App {
     @StateObject private var location = LocationService()
     @StateObject private var tagLibrary = TagLibrary()
     @StateObject private var songs = SongLibrary()
+    @StateObject private var looks = LookLibrary()
 
     init() {
         UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
@@ -19,6 +20,7 @@ struct ShotGuideApp: App {
                 .environmentObject(location)
                 .environmentObject(tagLibrary)
                 .environmentObject(songs)
+                .environmentObject(looks)
                 .preferredColorScheme(.dark)
                 .tint(.orange)
                 .onAppear { location.start() }

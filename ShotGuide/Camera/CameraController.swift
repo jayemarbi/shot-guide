@@ -18,6 +18,27 @@ struct RecordingResult {
     let resolution: String
     let lensLabel: String
     let elapsed: Double
+    /// Recorded in Apple Log (false: the phone's normal colour, where Log isn't available).
+    let log: Bool
+}
+
+/// The white balance a take was locked to: the camera's gains, and the same as a temperature and tint.
+struct WhiteBalance: Codable, Hashable {
+    var red: Float
+    var green: Float
+    var blue: Float
+    var kelvin: Int
+    var tint: Int
+    /// The lens it was measured on, as gains only carry over to the same camera.
+    var lens: String
+}
+
+/// What the camera was set to as a take started, for the catalogue.
+struct TakeSettings {
+    var whiteBalance: WhiteBalance? = nil
+    var iso: Int? = nil
+    /// Seconds, like 0.0167 for 1/60.
+    var shutter: Double? = nil
 }
 
 enum CameraError: Error {
@@ -46,6 +67,8 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var hasTorch = false
     /// The zoom on screen right now, like 1 or 2.5.
     @Published private(set) var displayZoom: Double = 1
+    /// This shot records in Apple Log.
+    @Published private(set) var logActive = false
 
     let session = AVCaptureSession()
 
@@ -53,6 +76,8 @@ final class CameraController: NSObject, ObservableObject {
     private let dataQueue = DispatchQueue(label: "shotguide.camera.data")
     private let movieOutput = AVCaptureMovieFileOutput()
     private let dataOutput = AVCaptureVideoDataOutput()
+    /// Small frames for drawing the preview through the look.
+    private let previewOutput = AVCaptureVideoDataOutput()
 
     // Session-queue state
     private var device: AVCaptureDevice?
@@ -63,6 +88,7 @@ final class CameraController: NSObject, ObservableObject {
     // Main-thread state
     private var mainConfig: CaptureConfig?
     private var activeFPS = 30
+    private var activeLog = false
     private var activeResolution = ""
     private var startTime: CFTimeInterval = 0
     private var ticker: Timer?
@@ -78,6 +104,8 @@ final class CameraController: NSObject, ObservableObject {
     private var lapseFrames: Int64 = 0
     private var lapseLast: CMTime = .invalid
     private var lapseActive = false
+    private var previewFront = false
+    private var previewLog = false
 
     // MARK: Permissions
 
@@ -172,19 +200,42 @@ final class CameraController: NSObject, ObservableObject {
             if session.canAddOutput(dataOutput) {
                 session.addOutput(dataOutput)
             }
-        } else if session.canAddOutput(movieOutput) {
-            session.addOutput(movieOutput)
+        } else {
+            if session.canAddOutput(movieOutput) {
+                session.addOutput(movieOutput)
+            }
+            // A second, screen-sized feed for the preview, drawn through the look.
+            previewOutput.alwaysDiscardsLateVideoFrames = true
+            previewOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+            previewOutput.automaticallyConfiguresOutputBufferDimensions = false
+            previewOutput.deliversPreviewSizedOutputBuffers = true
+            previewOutput.setSampleBufferDelegate(self, queue: dataQueue)
+            if session.canAddOutput(previewOutput) {
+                session.addOutput(previewOutput)
+            }
         }
 
-        if let format = Self.pickFormat(device: device, fps: config.fps) {
+        // Apple Log wherever the phone allows it, as it keeps the most for grading. Slow motion (over 60 fps)
+        // stays in the phone's normal colour, which is what it supports most reliably.
+        var usingLog = false
+        let logFormat = config.fps <= 60 ? Self.pickLogFormat(device: device, fps: config.fps) : nil
+        if let format = logFormat ?? Self.pickFormat(device: device, fps: config.fps) {
             do {
                 try device.lockForConfiguration()
                 device.activeFormat = format
-                if format.supportedColorSpaces.contains(.sRGB) {
+                if logFormat != nil, format.supportedColorSpaces.contains(.appleLog) {
+                    device.activeColorSpace = .appleLog
+                    usingLog = true
+                } else if format.supportedColorSpaces.contains(.sRGB) {
                     device.activeColorSpace = .sRGB
                 }
                 device.unlockForConfiguration()
             } catch {}
+        }
+        let front = config.lens == .front
+        dataQueue.async {
+            self.previewFront = front
+            self.previewLog = usingLog
         }
 
         let connection = isLapse ? dataOutput.connection(with: .video) : movieOutput.connection(with: .video)
@@ -219,6 +270,9 @@ final class CameraController: NSObject, ObservableObject {
             if device.isExposureModeSupported(.continuousAutoExposure) {
                 device.exposureMode = .continuousAutoExposure
             }
+            if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            }
             let bias = min(max(config.exposureBias, device.minExposureTargetBias), device.maxExposureTargetBias)
             device.setExposureTargetBias(bias, completionHandler: nil)
             device.unlockForConfiguration()
@@ -238,10 +292,12 @@ final class CameraController: NSObject, ObservableObject {
             titles[lens] = Self.label(for: lens, device: device)
         }
         let label = Self.label(for: config.lens, device: device)
-        let formatText = "\(Self.resolutionName(dimensions)) · " + (isLapse ? "Time-lapse" : "\(fps) fps")
+        let formatText = "\(Self.resolutionName(dimensions)) · " + (isLapse ? "Time-lapse" : "\(fps) fps") + (usingLog ? " · Log" : "")
         let torch = device.hasTorch
         DispatchQueue.main.async {
             self.activeFPS = isLapse ? 30 : fps
+            self.activeLog = usingLog
+            self.logActive = usingLog
             self.activeResolution = resolution
             self.availableLenses = lenses
             self.lensTitles = titles
@@ -454,6 +510,66 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
+    // MARK: White balance for a take
+
+    /// Locks the white balance for a take, so the colour can't drift partway through: to `reuse` (from a take
+    /// just before, at the same spot, on the same lens) or to what the camera has settled on. Reports it,
+    /// with the ISO and shutter speed, for the catalogue.
+    func beginTake(reuse: WhiteBalance?, lens: LensChoice, completion: @escaping (TakeSettings) -> Void) {
+        sessionQueue.async {
+            guard let device = self.device else {
+                DispatchQueue.main.async { completion(TakeSettings()) }
+                return
+            }
+            var balance: WhiteBalance? = nil
+            do {
+                try device.lockForConfiguration()
+                if device.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
+                    var gains = device.deviceWhiteBalanceGains
+                    if let reuse, reuse.lens == lens.rawValue {
+                        gains = AVCaptureDevice.WhiteBalanceGains(redGain: reuse.red, greenGain: reuse.green, blueGain: reuse.blue)
+                    }
+                    gains = Self.clampGains(gains, device: device)
+                    device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+                    balance = Self.whiteBalance(gains, device: device, lens: lens)
+                } else if device.isWhiteBalanceModeSupported(.locked) {
+                    device.whiteBalanceMode = .locked
+                    balance = Self.whiteBalance(Self.clampGains(device.deviceWhiteBalanceGains, device: device), device: device, lens: lens)
+                }
+                device.unlockForConfiguration()
+            } catch {}
+            let seconds = CMTimeGetSeconds(device.exposureDuration)
+            let settings = TakeSettings(whiteBalance: balance,
+                                        iso: Int(device.iso.rounded()),
+                                        shutter: seconds.isFinite && seconds > 0 ? seconds : nil)
+            DispatchQueue.main.async { completion(settings) }
+        }
+    }
+
+    /// Back to automatic white balance after a take.
+    func endTake() {
+        sessionQueue.async {
+            guard let device = self.device, device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) else { return }
+            do {
+                try device.lockForConfiguration()
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+                device.unlockForConfiguration()
+            } catch {}
+        }
+    }
+
+    static func clampGains(_ gains: AVCaptureDevice.WhiteBalanceGains, device: AVCaptureDevice) -> AVCaptureDevice.WhiteBalanceGains {
+        let top = device.maxWhiteBalanceGain
+        func clamp(_ value: Float) -> Float { min(max(value, 1), top) }
+        return AVCaptureDevice.WhiteBalanceGains(redGain: clamp(gains.redGain), greenGain: clamp(gains.greenGain), blueGain: clamp(gains.blueGain))
+    }
+
+    static func whiteBalance(_ gains: AVCaptureDevice.WhiteBalanceGains, device: AVCaptureDevice, lens: LensChoice) -> WhiteBalance {
+        let values = device.temperatureAndTintValues(for: gains)
+        return WhiteBalance(red: gains.redGain, green: gains.greenGain, blue: gains.blueGain,
+                            kelvin: Int(values.temperature.rounded()), tint: Int(values.tint.rounded()), lens: lens.rawValue)
+    }
+
     // MARK: Recording
 
     func startRecording(to url: URL, latitude: Double?, longitude: Double?, onFinish: @escaping (RecordingResult?) -> Void) {
@@ -511,7 +627,7 @@ final class CameraController: NSObject, ObservableObject {
         ticker?.invalidate()
         ticker = nil
         let result = url.map {
-            RecordingResult(url: $0, fps: activeFPS, resolution: activeResolution, lensLabel: lensLabel, elapsed: elapsed)
+            RecordingResult(url: $0, fps: activeFPS, resolution: activeResolution, lensLabel: lensLabel, elapsed: elapsed, log: activeLog)
         }
         phase = .ready
         let handler = finishHandler
@@ -659,6 +775,38 @@ final class CameraController: NSObject, ObservableObject {
         return candidates.max { score($0) < score($1) }
     }
 
+    /// The best 16:9 format that records Apple Log at the frame rate: 4K first. nil when there isn't one,
+    /// like for some slow-motion rates.
+    static func pickLogFormat(device: AVCaptureDevice, fps: Int) -> AVCaptureDevice.Format? {
+        let wanted = Double(fps)
+        func topRate(_ format: AVCaptureDevice.Format) -> Double {
+            format.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.max() ?? 0
+        }
+        let candidates = device.formats.filter { format in
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let isWidescreen = Int(dimensions.width) * 9 == Int(dimensions.height) * 16
+            return format.supportedColorSpaces.contains(.appleLog) && topRate(format) >= wanted - 0.5 && isWidescreen
+        }
+        func score(_ format: AVCaptureDevice.Format) -> Int {
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            var points = 0
+            if dimensions.width == 3840 {
+                points += 1000
+            } else if dimensions.width == 1920 {
+                points += 500
+            } else {
+                points += Int(dimensions.width) / 20
+            }
+            if format.isVideoStabilizationModeSupported(.cinematicExtended) { points += 40 }
+            if !format.isVideoBinned { points += 20 }
+            if CMFormatDescriptionGetMediaSubType(format.formatDescription) == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange {
+                points += 5
+            }
+            return points
+        }
+        return candidates.max { score($0) < score($1) }
+    }
+
     static func clampFPS(_ fps: Int, format: AVCaptureDevice.Format) -> Int {
         let ranges = format.videoSupportedFrameRateRanges
         let top = ranges.map { $0.maxFrameRate }.max() ?? 30
@@ -756,7 +904,10 @@ extension CameraController: AVCaptureFileOutputRecordingDelegate {
 
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard lapseActive, let input = writerInput, let adaptor else { return }
+        if let frame = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            LookRenderer.shared.renderPreview(frame, front: previewFront, log: previewLog)
+        }
+        guard output === dataOutput, lapseActive, let input = writerInput, let adaptor else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         if lapseLast.isValid, CMTimeGetSeconds(CMTimeSubtract(time, lapseLast)) < lapseInterval {
             return

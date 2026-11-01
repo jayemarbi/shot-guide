@@ -46,8 +46,29 @@ struct Clip: Codable, Identifiable, Hashable {
     var songName: String? = nil
     var songFile: String? = nil
     var songStart: Double? = nil
+    /// "Apple Log", or "Normal" where Log wasn't available for the shot. nil for clips from before 1.9
+    /// and ones added from Photos.
+    var colourProfile: String? = nil
+    /// The white balance the take was locked to, and the ISO and shutter speed (seconds) as it started.
+    var whiteBalance: WhiteBalance? = nil
+    var iso: Int? = nil
+    var shutter: Double? = nil
+
+    static let appleLog = "Apple Log"
+    static let normalColour = "Normal"
 
     var shotType: ShotType? { ShotType(rawValue: shot) }
+
+    var isLog: Bool { colourProfile == Clip.appleLog }
+
+    /// "1/60", for the catalogue and the review screen.
+    var shutterText: String? {
+        guard let shutter, shutter > 0 else { return nil }
+        if shutter >= 1 {
+            return String(format: "%.1fs", shutter)
+        }
+        return "1/\(Int((1 / shutter).rounded()))"
+    }
 
     var dayNumber: Int { day ?? 1 }
 

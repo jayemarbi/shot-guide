@@ -36,9 +36,11 @@ enum ClipPrep {
             status("Making cutouts of you: \(index + 1) of \(maskClips.count)…")
             let maskName = baseName(clip.fileName) + "_mask.mov"
             do {
+                // Log clips are flat and grey; the person finder works better on them made to look normal.
                 try await MaskMaker.makeMask(
                     for: folder.appendingPathComponent(clip.fileName),
-                    to: folder.appendingPathComponent(maskName))
+                    to: folder.appendingPathComponent(maskName),
+                    look: clip.isLog ? CubeLUT.standard : nil)
                 if var current = store.trip(id: tripID)?.clips.first(where: { $0.id == clip.id }) {
                     current.maskFileName = maskName
                     store.updateClip(current, in: tripID)

@@ -7,8 +7,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.8"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "1.9"
+    CURRENT_PROJECT_VERSION: "10"
 targets:
   ShotGuide:
     type: application
@@ -26,6 +26,7 @@ targets:
         NSMicrophoneUsageDescription: Shot Guide records the sound with your clips.
         NSLocationWhenInUseUsageDescription: Shot Guide saves where each trip and clip was filmed.
         NSSpeechRecognitionUsageDescription: Shot Guide writes down what you say in talking shots, on your phone, so edits can have captions.
+        NSPhotoLibraryAddUsageDescription: Shot Guide saves graded copies of your clips to Photos when you ask it to.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen: {}

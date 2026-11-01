@@ -5,6 +5,7 @@ struct TripListView: View {
     @State private var showingNewTrip = false
     @State private var path: [UUID] = []
     @State private var tripToDelete: Trip? = nil
+    @State private var showingLooks = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -43,6 +44,13 @@ struct TripListView: View {
             }
             .navigationTitle("Shot Guide")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingLooks = true
+                    } label: {
+                        Label("Look", systemImage: "camera.filters")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showingNewTrip = true
@@ -50,6 +58,9 @@ struct TripListView: View {
                         Label("New trip", systemImage: "plus")
                     }
                 }
+            }
+            .sheet(isPresented: $showingLooks) {
+                LookSheet()
             }
             .navigationDestination(for: UUID.self) { id in
                 TripView(tripID: id)

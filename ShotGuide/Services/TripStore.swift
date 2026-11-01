@@ -608,7 +608,8 @@ final class TripStore: ObservableObject {
         "shot", "take", "in_shot", "lens", "fps", "resolution", "length_s", "tags", "favourite", "notes",
         "variant", "mask_file", "captions_file", "transcript", "marks_s",
         "name", "trip", "day", "trip_type", "shake_dps", "tilt_deg", "take_check", "zoom", "on_phone",
-        "song", "song_file", "song_start_s"
+        "song", "song_file", "song_start_s",
+        "profile", "white_balance_k", "tint", "iso", "shutter"
     ]
 
     static func catalogCSV(for trip: Trip) -> String {
@@ -664,7 +665,14 @@ final class TripStore: ObservableObject {
             clip.songFile ?? "",
             clip.songStart.map { String(format: "%.3f", $0) } ?? ""
         ]
-        return first + added
+        let colour: [String] = [
+            clip.colourProfile ?? "",
+            clip.whiteBalance.map { String($0.kelvin) } ?? "",
+            clip.whiteBalance.map { String($0.tint) } ?? "",
+            clip.iso.map { String($0) } ?? "",
+            clip.shutterText ?? ""
+        ]
+        return first + added + colour
     }
 
     static func csvField(_ value: String) -> String {

@@ -51,6 +51,8 @@ struct ShotCameraView: View {
     @State private var autoStarted = false
     @State private var firedCues: Set<Int> = []
     @State private var takeMotion: TakeMotion? = nil
+    /// White balance, ISO and shutter as the take started.
+    @State private var takeSettings: TakeSettings? = nil
     @State private var startZoom: Double = 1
     @State private var reviewNote: String? = nil
     @State private var thermal: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
@@ -1026,6 +1028,14 @@ struct ShotCameraView: View {
             camera.lockFocusAndExposure()
         }
         level.beginTake()
+        // Lock the white balance for the take; a take just before at the same spot on the same lens shares it,
+        // so they match in the edit.
+        takeSettings = nil
+        let reuse = Self.sameSpotWhiteBalance(in: store.trip(id: tripID), latitude: coordinate?.latitude,
+                                              longitude: coordinate?.longitude, at: now, lens: used.lens)
+        camera.beginTake(reuse: reuse, lens: used.lens) { settings in
+            takeSettings = settings
+        }
         songStartAtRecording = nil
         if shot == .dance {
             camera.onRecordingStarted = {
@@ -1080,6 +1090,9 @@ struct ShotCameraView: View {
         if used.exposure == .lockAtStart {
             camera.resetFocusAndExposure()
         }
+        camera.endTake()
+        let settings = takeSettings
+        takeSettings = nil
         let motion = takeMotion ?? level.endTake()
         takeMotion = nil
         guard let result else {
@@ -1133,7 +1146,11 @@ struct ShotCameraView: View {
                 zoom: zoomAtStart,
                 songName: songInfo?.name,
                 songFile: songInfo.flatMap { store.attachSong($0.url, name: $0.name, tripID: tripID) },
-                songStart: songStart)
+                songStart: songStart,
+                colourProfile: result.log ? Clip.appleLog : Clip.normalColour,
+                whiteBalance: settings?.whiteBalance,
+                iso: settings?.iso,
+                shutter: settings?.shutter)
             store.addClip(clip, to: tripID)
             if prefill != nil {
                 // Named after the spot you're still at, so the file gets the name straight away.
@@ -1179,6 +1196,23 @@ struct ShotCameraView: View {
         let first: String = joined.prefix(1).uppercased()
         let rest = String(joined.dropFirst())
         return (first + rest + ". Another take?", passed)
+    }
+
+    /// The white balance of a take filmed in the last 15 minutes on the same lens, if you're still within
+    /// 300 m of it (or, without a location, just by time).
+    static func sameSpotWhiteBalance(in trip: Trip?, latitude: Double?, longitude: Double?, at date: Date,
+                                     lens: LensChoice) -> WhiteBalance? {
+        guard let trip else { return nil }
+        let recent = trip.clips.filter {
+            $0.whiteBalance?.lens == lens.rawValue && $0.recordedAt <= date && date.timeIntervalSince($0.recordedAt) < 15 * 60
+        }
+        guard let last = recent.max(by: { $0.recordedAt < $1.recordedAt }) else { return nil }
+        if let latitude, let longitude, let lastLatitude = last.latitude, let lastLongitude = last.longitude {
+            let here = CLLocation(latitude: latitude, longitude: longitude)
+            let there = CLLocation(latitude: lastLatitude, longitude: lastLongitude)
+            return here.distance(from: there) <= 300 ? last.whiteBalance : nil
+        }
+        return last.whiteBalance
     }
 
     /// The name of the last named clip, if you're still near it: within 300 m, or within 20 minutes

@@ -1,4 +1,5 @@
 import AVKit
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -14,6 +15,7 @@ struct ReviewView: View {
 
     @EnvironmentObject var store: TripStore
     @EnvironmentObject var tagLibrary: TagLibrary
+    @EnvironmentObject var looks: LookLibrary
     @Environment(\.dismiss) private var dismiss
 
     @State private var player: AVPlayer? = nil
@@ -27,6 +29,16 @@ struct ReviewView: View {
     @State private var loaded = false
     @State private var deleted = false
     @State private var confirmDelete = false
+    /// Which way an Apple Log clip's frames are stored, for playing it through the look.
+    @State private var logOrientation: CGImagePropertyOrientation = .right
+    @State private var copyState: CopyState = .idle
+
+    enum CopyState: Equatable {
+        case idle
+        case working(Double)
+        case done
+        case failed(String)
+    }
 
     /// Shot types a clip added from Photos can be given. Transitions need halves, so they're left out.
     static let importChoices: [ShotType] = ShotType.allCases.filter { !$0.isTransition && $0 != .voiceover && $0 != .quick }
@@ -40,6 +52,7 @@ struct ReviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     media
+                    gradedCopySection
                     checkSection
                     nameSection
                     if clip?.isAdded == true {
@@ -112,12 +125,76 @@ struct ReviewView: View {
             VideoPlayer(player: player)
                 .frame(height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+        } else if let player, clip?.isLog == true {
+            LogClipPlayer(player: player, orientation: logOrientation, lookName: looks.selected.name)
         } else if let player {
             VideoPlayer(player: player)
                 .aspectRatio(9.0 / 16.0, contentMode: .fit)
                 .frame(maxHeight: 400)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    /// Apple Log clips: save a normal-looking copy to Photos, for posting from the phone.
+    @ViewBuilder
+    private var gradedCopySection: some View {
+        if let clip, clip.isLog, clip.isOnPhone, !clip.isPhoto {
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    saveGradedCopy()
+                } label: {
+                    Label(copyButtonTitle, systemImage: copyState == .done ? "checkmark.circle.fill" : "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isCopying)
+                if case .working(let fraction) = copyState {
+                    ProgressView(value: fraction)
+                }
+                if case .failed(let text) = copyState {
+                    Text(text)
+                        .font(.footnote)
+                        .foregroundStyle(Color.red)
+                }
+                Text("A normal-looking copy with the \(looks.selected.name) look, for posting from your phone. The clip itself stays in Log for the edit.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var isCopying: Bool {
+        if case .working = copyState { return true }
+        return false
+    }
+
+    private var copyButtonTitle: String {
+        switch copyState {
+        case .idle, .failed: return "Save a graded copy to Photos"
+        case .working: return "Saving the graded copy…"
+        case .done: return "Saved to Photos"
+        }
+    }
+
+    private func saveGradedCopy() {
+        guard let clip, let trip = store.trip(id: tripID), let cube = looks.currentCube else { return }
+        let url = store.clipURL(clip, in: trip)
+        player?.pause()
+        copyState = .working(0)
+        Task {
+            do {
+                try await GradedCopy.saveToPhotos(clipURL: url, cube: cube) { fraction in
+                    DispatchQueue.main.async {
+                        if case .working = copyState {
+                            copyState = .working(fraction)
+                        }
+                    }
+                }
+                copyState = .done
+            } catch {
+                copyState = .failed(error.localizedDescription)
+            }
         }
     }
 
@@ -237,6 +314,11 @@ struct ReviewView: View {
             Text(parts.filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let colour = colourLine(clip) {
+                Text(colour)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if !marks.isEmpty {
                 Label("Marked at " + marks.joined(separator: ", "), systemImage: "star.fill")
                     .font(.caption)
@@ -248,6 +330,22 @@ struct ReviewView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// "Apple Log · 5600 K · ISO 125 · 1/60"
+    private func colourLine(_ clip: Clip) -> String? {
+        guard let profile = clip.colourProfile else { return nil }
+        var parts = [profile == Clip.appleLog ? "Apple Log" : "Normal colour"]
+        if let balance = clip.whiteBalance {
+            parts.append("\(balance.kelvin) K")
+        }
+        if let iso = clip.iso {
+            parts.append("ISO \(iso)")
+        }
+        if let shutter = clip.shutterText {
+            parts.append(shutter)
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// "Song: Espresso, from 1:22 in"
@@ -289,6 +387,14 @@ struct ReviewView: View {
             player = newPlayer
             if autoplay {
                 newPlayer.play()
+            }
+            if clip.isLog {
+                Task {
+                    if let track = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
+                       let transform = try? await track.load(.preferredTransform) {
+                        logOrientation = MaskMaker.orientation(of: transform)
+                    }
+                }
             }
         }
         let preselect = preselectSuggestions

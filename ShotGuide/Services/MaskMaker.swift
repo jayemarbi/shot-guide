@@ -15,7 +15,7 @@ enum MaskMaker {
     /// The short side of the mask video, in pixels. 1080 matches a 1080x1920 edit.
     static let shortSide: CGFloat = 1080
 
-    static func makeMask(for clipURL: URL, to maskURL: URL) async throws {
+    static func makeMask(for clipURL: URL, to maskURL: URL, look: CubeLUT? = nil) async throws {
         let asset = AVURLAsset(url: clipURL)
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw MaskError.noVideo
@@ -68,6 +68,7 @@ enum MaskMaker {
         let bounds = CGRect(x: 0, y: 0, width: width, height: height)
         var started = false
         var written = 0
+        var lookPool: CVPixelBufferPool? = nil
 
         while let sample = output.copyNextSampleBuffer() {
             guard let frame = CMSampleBufferGetImageBuffer(sample) else { continue }
@@ -88,7 +89,11 @@ enum MaskMaker {
             guard let pool = adaptor.pixelBufferPool else { throw MaskError.cannotWrite }
 
             let appended: Bool = autoreleasepool {
-                var image = CIImage(cvPixelBuffer: frame).oriented(orientation)
+                var source = frame
+                if let look, let graded = Self.graded(frame, look: look, context: context, pool: &lookPool) {
+                    source = graded
+                }
+                var image = CIImage(cvPixelBuffer: source).oriented(orientation)
                 image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
                 image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
                 guard (try? handler.perform([request], on: image)) != nil,
@@ -126,6 +131,25 @@ enum MaskMaker {
             try? FileManager.default.removeItem(at: maskURL)
             throw writer.error ?? MaskError.cannotWrite
         }
+    }
+
+    /// A frame put through a look (raw values in, no colour management), for clips filmed in Apple Log.
+    static func graded(_ frame: CVPixelBuffer, look: CubeLUT, context: CIContext, pool: inout CVPixelBufferPool?) -> CVPixelBuffer? {
+        if pool == nil {
+            let attributes: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: CVPixelBufferGetWidth(frame),
+                kCVPixelBufferHeightKey as String: CVPixelBufferGetHeight(frame),
+                kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()
+            ]
+            CVPixelBufferPoolCreate(nil, nil, attributes as CFDictionary, &pool)
+        }
+        guard let pool else { return nil }
+        var out: CVPixelBuffer?
+        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &out)
+        guard let out else { return nil }
+        context.render(look.apply(to: CIImage(cvPixelBuffer: frame, options: [.colorSpace: NSNull()])), to: out)
+        return out
     }
 
     /// Which way the clip's frames are stored, from its track transform.

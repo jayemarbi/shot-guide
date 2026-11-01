@@ -6,9 +6,23 @@ import UIKit
 final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
+    /// The picture through the look (Apple Log made to look normal, plus the highlight stripes), drawn over
+    /// the plain preview. The plain one still sits underneath for working out where taps land.
+    let lookLayer = LookRenderer.makeLayer()
+
     var previewLayer: AVCaptureVideoPreviewLayer {
         // layerClass guarantees this cast.
         layer as! AVCaptureVideoPreviewLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.addSublayer(lookLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        layer.addSublayer(lookLayer)
     }
 
     override func layoutSubviews() {
@@ -16,6 +30,15 @@ final class PreviewView: UIView {
         if let connection = previewLayer.connection, connection.isVideoRotationAngleSupported(90) {
             connection.videoRotationAngle = 90
         }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        lookLayer.frame = bounds
+        CATransaction.commit()
+        let scale = window?.screen.scale ?? UIScreen.main.scale
+        lookLayer.contentsScale = scale
+        let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        lookLayer.drawableSize = size
+        LookRenderer.shared.attachPreview(lookLayer, pixelSize: size)
     }
 }
 
