@@ -42,6 +42,10 @@ struct Clip: Codable, Identifiable, Hashable {
     var zoom: Double? = nil
     /// The file was removed from the phone after it was copied to the SSD. The trip still lists it.
     var removedFromPhone: Bool? = nil
+    /// DANCE: the song, its copy in the trip folder, and where in the song (seconds) the clip's first frame is.
+    var songName: String? = nil
+    var songFile: String? = nil
+    var songStart: Double? = nil
 
     var shotType: ShotType? { ShotType(rawValue: shot) }
 

@@ -242,7 +242,18 @@ struct ReviewView: View {
                     .font(.caption)
                     .foregroundStyle(Color.yellow)
             }
+            if let songName = clip.songName {
+                Label(songLine(songName, start: clip.songStart), systemImage: "music.note")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    /// "Song: Espresso, from 1:22 in"
+    private func songLine(_ name: String, start: Double?) -> String {
+        guard let start else { return "Song: " + name }
+        return "Song: " + name + ", from " + clockString(start) + " in"
     }
 
     /// The file name with the name you're typing, so you can see how it'll be saved.

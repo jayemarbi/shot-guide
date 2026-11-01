@@ -309,6 +309,29 @@ final class TripStore: ObservableObject {
         folderURL(for: trip).appendingPathComponent(clip.fileName)
     }
 
+    /// DANCE songs copied into a trip's folder start with this, so they're never mistaken for clips.
+    static let songPrefix = "SONG_"
+
+    /// Copies a DANCE song into the trip's folder (once), so it goes to the SSD with the clips for matching the
+    /// edit to the beat. Returns its file name there.
+    func attachSong(_ source: URL, name: String, tripID: UUID) -> String? {
+        guard let trip = self.trip(id: tripID) else { return nil }
+        let folder = folderURL(for: trip)
+        let slug = Self.nameSlug(name)
+        let fileExtension = source.pathExtension.isEmpty ? "m4a" : source.pathExtension.lowercased()
+        let fileName = Self.songPrefix + (slug.isEmpty ? "Song" : slug) + "." + fileExtension
+        let destination = folder.appendingPathComponent(fileName)
+        if !FileManager.default.fileExists(atPath: destination.path) {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.copyItem(at: source, to: destination)
+            } catch {
+                return nil
+            }
+        }
+        return fileName
+    }
+
     // MARK: Export
 
     /// The top folder a trip goes into on a drive or PC: Shot Guide/<continent>/<country>/<state>/<date place>/.
@@ -466,7 +489,7 @@ final class TripStore: ObservableObject {
 
     /// A clip you filmed, as opposed to a cutout mask made from one.
     static func isClip(_ url: URL) -> Bool {
-        isVideo(url) && !url.lastPathComponent.hasSuffix("_mask.mov")
+        isVideo(url) && !url.lastPathComponent.hasSuffix("_mask.mov") && !url.lastPathComponent.hasPrefix(songPrefix)
     }
 
     static func fileSize(_ url: URL) -> Int? {
@@ -584,7 +607,8 @@ final class TripStore: ObservableObject {
         "file", "place", "state", "country", "continent", "latitude", "longitude", "date", "time", "light",
         "shot", "take", "in_shot", "lens", "fps", "resolution", "length_s", "tags", "favourite", "notes",
         "variant", "mask_file", "captions_file", "transcript", "marks_s",
-        "name", "trip", "day", "trip_type", "shake_dps", "tilt_deg", "take_check", "zoom", "on_phone"
+        "name", "trip", "day", "trip_type", "shake_dps", "tilt_deg", "take_check", "zoom", "on_phone",
+        "song", "song_file", "song_start_s"
     ]
 
     static func catalogCSV(for trip: Trip) -> String {
@@ -635,7 +659,10 @@ final class TripStore: ObservableObject {
             clip.tilt.map { String(format: "%.1f", $0) } ?? "",
             clip.check ?? "",
             clip.zoom.map { String(format: "%.1f", $0) } ?? "",
-            clip.isOnPhone ? "yes" : "no"
+            clip.isOnPhone ? "yes" : "no",
+            clip.songName ?? "",
+            clip.songFile ?? "",
+            clip.songStart.map { String(format: "%.3f", $0) } ?? ""
         ]
         return first + added
     }

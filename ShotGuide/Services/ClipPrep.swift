@@ -11,7 +11,9 @@ enum ClipPrep {
     ]
 
     static func needsMask(_ clip: Clip) -> Bool {
-        clip.isOnPhone && clip.inShot && clip.shot != ShotType.timelapse.rawValue && clip.maskFileName == nil
+        // DANCE takes can run a whole song, which would take ages to cut out on the phone, so they're skipped.
+        clip.isOnPhone && clip.inShot && clip.shot != ShotType.timelapse.rawValue && clip.shot != ShotType.dance.rawValue
+            && clip.maskFileName == nil
     }
 
     static func needsCaptions(_ clip: Clip) -> Bool {

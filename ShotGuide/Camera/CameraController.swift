@@ -8,6 +8,8 @@ struct CaptureConfig: Equatable {
     var timelapseInterval: Double?
     /// Brighter (snow) or darker (silhouettes) than the camera would choose by itself.
     var exposureBias: Float = 0
+    /// DANCE: a song plays (in AirPods or on the speaker) while the phone's own mic records.
+    var playsMusic: Bool = false
 }
 
 struct RecordingResult {
@@ -65,6 +67,8 @@ final class CameraController: NSObject, ObservableObject {
     private var startTime: CFTimeInterval = 0
     private var ticker: Timer?
     private var finishHandler: ((RecordingResult?) -> Void)?
+    /// Called on the main thread the moment the file starts recording, for timing a song to the clip.
+    var onRecordingStarted: (() -> Void)?
 
     // Time-lapse state, used on dataQueue
     private var writer: AVAssetWriter?
@@ -140,16 +144,24 @@ final class CameraController: NSObject, ObservableObject {
         }
         self.device = device
 
+        // With a song playing, the app sets up the sound itself so the song can go to AirPods in full quality
+        // while the phone's own mic records. Otherwise the camera sets it up.
+        session.automaticallyConfiguresApplicationAudioSession = !config.playsMusic
+        if config.playsMusic {
+            Self.prepareMusicAudioSession()
+        }
+
         if !isLapse,
            let microphone = AVCaptureDevice.default(for: .audio),
            let microphoneInput = try? AVCaptureDeviceInput(device: microphone),
            session.canAddInput(microphoneInput) {
             session.addInput(microphoneInput)
             // Stereo and wind noise reduction where the phone's own mics support them. A clip-on mic stays as it is.
-            if microphoneInput.isMultichannelAudioModeSupported(.stereo) {
+            // DANCE skips them: the song replaces the clip's sound in the edit anyway.
+            if !config.playsMusic && microphoneInput.isMultichannelAudioModeSupported(.stereo) {
                 microphoneInput.multichannelAudioMode = .stereo
             }
-            if microphoneInput.isWindNoiseRemovalSupported {
+            if !config.playsMusic && microphoneInput.isWindNoiseRemovalSupported {
                 microphoneInput.isWindNoiseRemovalEnabled = true
             }
         }
@@ -486,6 +498,7 @@ final class CameraController: NSObject, ObservableObject {
 
     private func recordingStarted() {
         startTime = CACurrentMediaTime()
+        onRecordingStarted?()
         elapsed = 0
         ticker?.invalidate()
         ticker = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -504,6 +517,17 @@ final class CameraController: NSObject, ObservableObject {
         let handler = finishHandler
         finishHandler = nil
         handler?(result)
+    }
+
+    /// Plays to AirPods in full quality (not the phone-call mode Bluetooth mics need), or the loudspeaker
+    /// without them, and records from the phone's own mic.
+    static func prepareMusicAudioSession() {
+        let audio = AVAudioSession.sharedInstance()
+        try? audio.setCategory(.playAndRecord, mode: .videoRecording, options: [.allowBluetoothA2DP, .defaultToSpeaker])
+        try? audio.setActive(true)
+        if let builtIn = audio.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+            try? audio.setPreferredInput(builtIn)
+        }
     }
 
     static func locationMetadata(latitude: Double?, longitude: Double?) -> [AVMetadataItem] {

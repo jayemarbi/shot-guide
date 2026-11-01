@@ -20,6 +20,8 @@ struct ShotCameraView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var camera = CameraController()
     @StateObject private var level = LevelMeter()
+    @StateObject private var song = SongPlayer()
+    @EnvironmentObject var songs: SongLibrary
     @AppStorage("showGrid") private var showGrid = true
 
     @State private var inShot: Bool
@@ -54,6 +56,14 @@ struct ShotCameraView: View {
     @State private var thermal: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     @State private var battery: Float = -1
     @State private var charging = false
+    /// DANCE: where in the song the next take starts, the song's position when the last take started recording,
+    /// and where the song plays (AirPods or the phone's speaker).
+    @State private var danceStart: DanceStart = .fromTop
+    @State private var pickedPoint: Double = 0
+    @State private var showSongPicker = false
+    @State private var showPointPicker = false
+    @State private var songStartAtRecording: Double? = nil
+    @State private var routeName = ""
 
     init(tripID: UUID, shot: ShotType, day: Int, fixedVariant: Int? = nil, autoStart: Bool = false) {
         self.tripID = tripID
@@ -112,6 +122,9 @@ struct ShotCameraView: View {
     private var takeLabel: String {
         if shot == .quick {
             return "clip \(take)"
+        }
+        if shot == .dance {
+            return "take \(take)"
         }
         if fixedVariant != nil, let half = plan.variantName {
             return "\(half) half"
@@ -259,6 +272,11 @@ struct ShotCameraView: View {
         content
             .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
                 micName = MicCheck.currentMicName() ?? ""
+                DispatchQueue.main.async { routeName = Self.songRouteName() }
+            }
+            .onChange(of: songs.selectedFile) { _, _ in
+                loadSong()
+                danceStart = carryOnPoint == nil ? .fromTop : .carryOn
             }
             .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
                 DispatchQueue.main.async { thermal = ProcessInfo.processInfo.thermalState }
@@ -273,6 +291,11 @@ struct ShotCameraView: View {
                 if oldPhase == .recording {
                     // The take has ended: sum up the shake and tilt before the phone gets lowered.
                     takeMotion = level.endTake()
+                    if shot == .dance && songStartAtRecording == nil, let heard = song.heardPosition {
+                        // The song hadn't started when recording did: work it out from where it is now.
+                        songStartAtRecording = max(0, heard - camera.elapsed)
+                    }
+                    song.stop()
                 }
                 if phase == .ready {
                     micName = MicCheck.currentMicName() ?? ""
@@ -502,6 +525,9 @@ struct ShotCameraView: View {
 
     private var bottomControls: some View {
         VStack(spacing: 14) {
+            if shot == .dance && !isBusy {
+                songPanel
+            }
             if let warningText, !isBusy || thermal == .critical {
                 Label(warningText, systemImage: thermal == .nominal || thermal == .fair ? "battery.25" : "thermometer.sun.fill")
                     .font(.subheadline.weight(.semibold))
@@ -770,6 +796,11 @@ struct ShotCameraView: View {
         if shot == .matchCut {
             loadGhost()
         }
+        if shot == .dance {
+            loadSong()
+            danceStart = carryOnPoint == nil ? .fromTop : .carryOn
+            routeName = Self.songRouteName()
+        }
         if let minutes = store.minutesOfVideoLeft, minutes < 10 {
             message = "Only about \(minutes) minutes of 4K space left. Copy a trip to your SSD soon."
         }
@@ -922,11 +953,17 @@ struct ShotCameraView: View {
             camera.stopRecording()
         case .ready:
             guard reviewClip == nil, !permissionDenied else { return }
+            if shot == .dance && song.loadedURL == nil {
+                message = "Pick a song first."
+                showSongPicker = true
+                return
+            }
             message = nil
             showBriefing = false
             if timing.countdown > 0 {
                 startCountdown()
             } else {
+                startSong(lead: 0)
                 beginRecording()
             }
         default:
@@ -937,6 +974,7 @@ struct ShotCameraView: View {
     private func startCountdown() {
         showBriefing = false
         let total = max(timing.countdown, 1)
+        startSong(lead: Double(total))
         // The flash tells you when recording starts if you're in front of the phone.
         let useFlash = plan.isInShot && plan.lens != .front && camera.hasTorch
         countdownTask?.cancel()
@@ -967,6 +1005,7 @@ struct ShotCameraView: View {
         countdownTask = nil
         countdownRemaining = nil
         camera.setTorch(false)
+        song.stop()
     }
 
     private func beginRecording() {
@@ -987,6 +1026,12 @@ struct ShotCameraView: View {
             camera.lockFocusAndExposure()
         }
         level.beginTake()
+        songStartAtRecording = nil
+        if shot == .dance {
+            camera.onRecordingStarted = {
+                songStartAtRecording = song.heardPosition
+            }
+        }
         camera.startRecording(to: url, latitude: coordinate?.latitude, longitude: coordinate?.longitude) { result in
             saveTake(result, plan: used, startedAt: now, latitude: coordinate?.latitude, longitude: coordinate?.longitude)
         }
@@ -1019,6 +1064,9 @@ struct ShotCameraView: View {
         if timing.stopsByItself, value >= stopTime {
             camera.stopRecording()
         }
+        if shot == .dance && song.finished && value > 1 {
+            camera.stopRecording()
+        }
     }
 
     private func saveTake(_ result: RecordingResult?, plan used: ShotPlan, startedAt: Date, latitude: Double?, longitude: Double?) {
@@ -1040,6 +1088,8 @@ struct ShotCameraView: View {
         }
         let takeMarks = marks
         let zoomAtStart = startZoom
+        let songInfo: (name: String, url: URL)? = shot == .dance ? songs.selected.map { ($0.name, songs.url(for: $0)) } : nil
+        let songStart = songStartAtRecording
         let check = Self.checkResult(motion, kind: shot.takeCheck(variantName: used.variantName), onTripod: used.isInShot)
         let prefill = Self.nearbyName(in: store.trip(id: tripID), latitude: latitude, longitude: longitude, at: startedAt)
         Task { @MainActor in
@@ -1080,7 +1130,10 @@ struct ShotCameraView: View {
                 tilt: motion?.tilt,
                 check: check?.text,
                 checkPassed: check?.passed,
-                zoom: zoomAtStart)
+                zoom: zoomAtStart,
+                songName: songInfo?.name,
+                songFile: songInfo.flatMap { store.attachSong($0.url, name: $0.name, tripID: tripID) },
+                songStart: songStart)
             store.addClip(clip, to: tripID)
             if prefill != nil {
                 // Named after the spot you're still at, so the file gets the name straight away.
@@ -1146,7 +1199,10 @@ struct ShotCameraView: View {
         take = store.nextTake(tripID: tripID, shot: shot, day: day)
         variant = variantFor(take: take)
         reviewNote = nil
-        guard let trip = store.trip(id: tripID), shot != .quick else { return }
+        if shot == .dance {
+            danceStart = carryOnPoint == nil ? .fromTop : .carryOn
+        }
+        guard let trip = store.trip(id: tripID), shot != .quick, shot != .dance else { return }
         if let fixedVariant {
             // One half of a transition: done once that half has a take.
             let half = ShotSlot(shot: shot, half: fixedVariant)
@@ -1167,5 +1223,134 @@ struct ShotCameraView: View {
         guard let time = try? await asset.load(.duration) else { return nil }
         let seconds = CMTimeGetSeconds(time)
         return seconds.isFinite && seconds > 0 ? seconds : nil
+    }
+}
+
+/// DANCE: where in the song a take starts.
+enum DanceStart: Hashable {
+    /// 10 seconds before where the last take with this song ended, so swaps between spots overlap.
+    case carryOn
+    case fromTop
+    case picked
+}
+
+// MARK: DANCE
+
+extension ShotCameraView {
+    /// 10 seconds before where the last DANCE take with this song on this trip ended.
+    var carryOnPoint: Double? {
+        guard let name = songs.selected?.name, let trip = store.trip(id: tripID) else { return nil }
+        let takes = trip.clips.filter { $0.shot == ShotType.dance.rawValue && $0.songName == name && $0.songStart != nil }
+        guard let last = takes.max(by: { $0.recordedAt < $1.recordedAt }), let start = last.songStart else { return nil }
+        return max(0, start + last.durationSeconds - 10)
+    }
+
+    var danceStartPoint: Double {
+        switch danceStart {
+        case .carryOn: return carryOnPoint ?? 0
+        case .fromTop: return 0
+        case .picked: return pickedPoint
+        }
+    }
+
+    func loadSong() {
+        guard let selected = songs.selected else {
+            song.stop()
+            return
+        }
+        if !song.load(songs.url(for: selected)) {
+            message = "That song couldn't be played. Pick another."
+        }
+    }
+
+    /// Starts the song so the chosen point lands as recording starts: `lead` seconds early, or later from the very
+    /// start of the song when the point is closer to the start than that.
+    func startSong(lead: Double) {
+        guard shot == .dance, song.loadedURL != nil else { return }
+        let point = danceStartPoint
+        let early = min(lead, point)
+        song.play(from: point - early, after: lead - early)
+    }
+
+    /// The headphones the song plays in, like "Jody's AirPods Pro", or "" for the phone's speaker.
+    static func songRouteName() -> String {
+        let headphones: [AVAudioSession.Port] = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP, .headphones, .airPlay]
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        return outputs.first { headphones.contains($0.portType) }?.portName ?? ""
+    }
+
+    var songPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            songTitleButton
+            if songs.selected != nil {
+                startPicker
+                if danceStart == .picked {
+                    Button("Starting at \(clockString(pickedPoint)) · Change") {
+                        showPointPicker = true
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+                Text(routeLine)
+                    .font(.caption)
+                    .foregroundStyle(Color.white.opacity(0.75))
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+        .sheet(isPresented: $showSongPicker) {
+            SongPickerSheet()
+                .environmentObject(songs)
+        }
+        .sheet(isPresented: $showPointPicker) {
+            pointSheet
+        }
+        .onChange(of: danceStart) { _, start in
+            if start == .picked {
+                showPointPicker = true
+            }
+        }
+    }
+
+    private var routeLine: String {
+        routeName.isEmpty
+            ? "Plays on the phone's speaker. Connect your AirPods to hear it better."
+            : "Plays in \(routeName)"
+    }
+
+    private var songTitleButton: some View {
+        Button {
+            showSongPicker = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "music.note")
+                    .foregroundStyle(Color.orange)
+                Text(songs.selected?.name ?? "Pick a song")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text(songs.selected == nil ? "" : "Change")
+                    .font(.caption)
+                    .foregroundStyle(Color.white.opacity(0.7))
+            }
+        }
+    }
+
+    private var startPicker: some View {
+        Picker("Start", selection: $danceStart) {
+            if let carry = carryOnPoint {
+                Text("Carry on \(clockString(carry))").tag(DanceStart.carryOn)
+            }
+            Text("From the top").tag(DanceStart.fromTop)
+            Text("Pick a point").tag(DanceStart.picked)
+        }
+        .pickerStyle(.segmented)
+    }
+
+    @ViewBuilder
+    private var pointSheet: some View {
+        if let selected = songs.selected {
+            SongPointSheet(songURL: songs.url(for: selected), point: $pickedPoint)
+        }
     }
 }

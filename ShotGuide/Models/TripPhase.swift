@@ -114,7 +114,7 @@ enum TripPhase: String, CaseIterable, Identifiable {
             let shots: [ShotType] = [.ambient, .detail, .food, .wide, .slomo, .talk, .walkaway, .tele, .secondAngle, .moment, .timelapse]
             return shots.map { ShotSlot(shot: $0, half: nil) }
         case .creative:
-            let shots: [ShotType] = [.sounds, .reflection, .rise, .orbit, .hyperlapse, .dollyZoom, .matchCut, .silhouette, .clone]
+            let shots: [ShotType] = [.sounds, .reflection, .rise, .orbit, .hyperlapse, .dollyZoom, .dance, .matchCut, .silhouette, .clone]
             return shots.map { ShotSlot(shot: $0, half: nil) }
         case .leaving:
             return [

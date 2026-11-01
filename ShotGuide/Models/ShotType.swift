@@ -111,7 +111,7 @@ struct ShotPlan {
 
     var captureConfig: CaptureConfig {
         CaptureConfig(lens: lens, fps: fps, stabilisation: stabilisation, timelapseInterval: timelapseInterval,
-                      exposureBias: exposureBias)
+                      exposureBias: exposureBias, playsMusic: shot == .dance)
     }
 
     /// Phone-in-hand shots start straight away; shots you're in count you in.
@@ -168,6 +168,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case silhouette = "SILHOUETTE"
     case reflection = "REFLECTION"
     case sounds = "SOUNDS"
+    /// Dancing or lip-syncing to a song that plays in your AirPods, timed to the recording.
+    case dance = "DANCE"
     /// Quick clip: straight to recording with no guidance, for moments that won't wait.
     case quick = "QUICK"
 
@@ -201,7 +203,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     var countsTowardTotal: Bool {
         switch self {
         case .bodyWipe, .whip, .follow, .food, .onTheWay, .voiceover: return false
-        case .matchCut, .clone, .jump, .rise, .orbit, .dollyZoom, .hyperlapse, .silhouette, .reflection, .sounds, .quick:
+        case .matchCut, .clone, .jump, .rise, .orbit, .dollyZoom, .hyperlapse, .silhouette, .reflection, .sounds, .dance, .quick:
             return false
         default: return true
         }
@@ -210,7 +212,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     var defaultGroup: ShotGroup {
         switch self {
         case .reaction, .timelapse, .walkaway, .tele, .moment, .talk, .secondAngle, .bodyWipe: return .inShot
-        case .matchCut, .clone, .jump, .silhouette: return .inShot
+        case .matchCut, .clone, .jump, .silhouette, .dance: return .inShot
         default: return .inHand
         }
     }
@@ -230,7 +232,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     func takeCheck(variantName: String?) -> TakeCheckKind {
         switch self {
         case .wide, .tele, .slomo, .ambient, .timelapse, .talk, .moment, .walkaway, .secondAngle, .bodyWipe, .transition,
-             .matchCut, .clone, .jump, .silhouette:
+             .matchCut, .clone, .jump, .silhouette, .dance:
             return .steadyAndLevel
         case .reveal:
             return variantName == "Auto zoom" ? .steadyAndLevel : .none
@@ -276,6 +278,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .orbit: return "A slow circle around your partner"
         case .dollyZoom: return "Walk back while the app zooms in"
         case .hyperlapse: return "A slow walk, sped up into a glide"
+        case .dance: return "Dance or lip-sync to your song, with the view behind you"
         case .silhouette: return "The two of you against the sunset"
         case .reflection: return "The scene doubled in still water"
         case .sounds: return "Close-ups made for their sound"
@@ -765,6 +768,19 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 0, end: 2, text: "Frame half reflection, half scene."),
                     GuideStep(start: 2, end: 10, text: "Hold still. Someone walking through looks great."),
                     GuideStep(start: 10, end: 12, text: "Hold.")
+                ])
+
+        case .dance:
+            return ShotPlan(
+                shot: self, take: take, group: .inShot,
+                lens: .wide, fps: 60, stabilisation: .off,
+                autoStop: nil, manualLength: 60, countdown: 10,
+                before: "Tripod, framed wide with the view big and you full-body in it. Put your AirPods in: the song "
+                    + "starts during the countdown, so your part lands as recording starts. At each new spot, carry on from "
+                    + "10 seconds before where you stopped, or dance it from the top.",
+                steps: [
+                    GuideStep(start: 0, end: nil,
+                              text: "Dance to the song. Stop with your remote or the red button, or let the song finish.")
                 ])
 
         default:
