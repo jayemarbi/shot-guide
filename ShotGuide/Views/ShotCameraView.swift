@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreLocation
 import SwiftUI
 import UIKit
 
@@ -7,8 +8,12 @@ import UIKit
 struct ShotCameraView: View {
     let tripID: UUID
     let shot: ShotType
+    /// The day of the trip the clips are filed under.
+    let day: Int
     /// Opened from a transition's Out or In row: stick to that half for every take.
     let fixedVariant: Int?
+    /// Quick clip: start recording as soon as the camera is ready.
+    let autoStart: Bool
 
     @EnvironmentObject var store: TripStore
     @EnvironmentObject var location: LocationService
@@ -37,13 +42,32 @@ struct ShotCameraView: View {
     @State private var markNote: String? = nil
     @State private var lowLight = false
     @State private var micName = ""
+    /// MATCH CUT: a still of the last one, and the zoom it used.
+    @State private var ghost: UIImage? = nil
+    @State private var ghostZoom: Double? = nil
+    @State private var zoomRestored = false
+    @State private var autoStarted = false
+    @State private var firedCues: Set<Int> = []
+    @State private var takeMotion: TakeMotion? = nil
+    @State private var startZoom: Double = 1
+    @State private var reviewNote: String? = nil
+    @State private var thermal: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    @State private var battery: Float = -1
+    @State private var charging = false
 
-    init(tripID: UUID, shot: ShotType, fixedVariant: Int? = nil) {
+    init(tripID: UUID, shot: ShotType, day: Int, fixedVariant: Int? = nil, autoStart: Bool = false) {
         self.tripID = tripID
         self.shot = shot
+        self.day = day
         self.fixedVariant = fixedVariant
+        self.autoStart = autoStart
         _inShot = State(initialValue: shot.defaultGroup == .inShot)
-        _showBriefing = State(initialValue: shot.defaultGroup == .inShot)
+        _showBriefing = State(initialValue: shot.defaultGroup == .inShot && !autoStart)
+    }
+
+    /// The day's trip type, which tunes the takes, the tips and, for snow, the brightness.
+    private var tripType: TripType {
+        store.trip(id: tripID)?.day(day).type ?? .general
     }
 
     /// The version for the next take: the half you picked on the trip page, or the shot's usual pattern.
@@ -56,6 +80,11 @@ struct ShotCameraView: View {
         // 60 fps lets an edit slow movement down, but it needs light. Once the sun is down, 30 fps looks better.
         if lowLight && plan.fps == 60 {
             plan.fps = 30
+        }
+        let type = tripType
+        plan.exposureBias = plan.exposure == .silhouette ? -1.7 : type.exposureBias
+        if let tip = type.tip(for: shot) {
+            plan.before = plan.before.isEmpty ? tip + "." : tip + ". " + plan.before
         }
         return plan
     }
@@ -81,10 +110,33 @@ struct ShotCameraView: View {
     }
 
     private var takeLabel: String {
+        if shot == .quick {
+            return "clip \(take)"
+        }
         if fixedVariant != nil, let half = plan.variantName {
             return "\(half) half"
         }
-        return take > shot.targetTakes ? "extra take \(take)" : "take \(take) of \(shot.targetTakes)"
+        let target = tripType.target(for: shot)
+        return take > target ? "extra take \(take)" : "take \(take) of \(target)"
+    }
+
+    /// Heat and battery, shown above the camera controls when they could cut a take short.
+    private var warningText: String? {
+        if thermal == .critical {
+            return "The phone is too hot to film well. Let it cool in the shade for a few minutes."
+        }
+        if thermal == .serious {
+            return "The phone is getting hot and recording may stop. Shade it between takes."
+        }
+        guard battery >= 0, !charging else { return nil }
+        let percent = Int((battery * 100).rounded())
+        if (shot == .timelapse || shot == .hyperlapse) && battery < 0.25 {
+            return "Battery at \(percent)%. A long \(shot.title) needs more, so plug in a power bank."
+        }
+        if battery < 0.1 {
+            return "Battery at \(percent)%. The cold drains it faster, so keep the phone in a warm pocket between shots."
+        }
+        return nil
     }
 
     /// Changes to timing are remembered for this shot.
@@ -123,6 +175,10 @@ struct ShotCameraView: View {
     }
 
     var body: some View {
+        events(screen)
+    }
+
+    private var screen: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -173,6 +229,9 @@ struct ShotCameraView: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
+            shotGuideOverlay
+                .allowsHitTesting(false)
+
             VStack(spacing: 0) {
                 topBar
                 Spacer()
@@ -194,30 +253,49 @@ struct ShotCameraView: View {
             }
         }
         .statusBarHidden(true)
-        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
-            micName = MicCheck.currentMicName() ?? ""
-        }
-        .onChange(of: camera.phase) { _, phase in
-            if phase == .ready {
+    }
+
+    private func events<Content: View>(_ content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
                 micName = MicCheck.currentMicName() ?? ""
             }
-        }
-        .onAppear(perform: start)
-        .onDisappear(perform: finish)
-        .onChange(of: camera.elapsed) { _, value in
-            tick(value)
-        }
-        .onChange(of: inShot) { _, _ in planChanged() }
-        .onChange(of: variant) { _, _ in planChanged() }
-        .onChange(of: take) { _, _ in planChanged() }
-        .sheet(item: $reviewClip, onDismiss: reviewDismissed) { clip in
-            ReviewView(
-                tripID: tripID,
-                clipID: clip.id,
-                autoplay: clip.inShot,
-                preselectSuggestions: true,
-                title: "\(shot.title) · take \(clip.take)")
-        }
+            .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+                DispatchQueue.main.async { thermal = ProcessInfo.processInfo.thermalState }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
+                readBattery()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in
+                readBattery()
+            }
+            .onChange(of: camera.phase) { oldPhase, phase in
+                if oldPhase == .recording {
+                    // The take has ended: sum up the shake and tilt before the phone gets lowered.
+                    takeMotion = level.endTake()
+                }
+                if phase == .ready {
+                    micName = MicCheck.currentMicName() ?? ""
+                    cameraReady()
+                }
+            }
+            .onAppear(perform: start)
+            .onDisappear(perform: finish)
+            .onChange(of: camera.elapsed) { _, value in
+                tick(value)
+            }
+            .onChange(of: inShot) { _, _ in planChanged() }
+            .onChange(of: variant) { _, _ in planChanged() }
+            .onChange(of: take) { _, _ in planChanged() }
+            .sheet(item: $reviewClip, onDismiss: reviewDismissed) { clip in
+                ReviewView(
+                    tripID: tripID,
+                    clipID: clip.id,
+                    autoplay: clip.inShot,
+                    preselectSuggestions: true,
+                    title: "\(shot.title) · take \(clip.take)",
+                    nameNote: reviewNote)
+            }
     }
 
     // MARK: Pieces of the screen
@@ -424,6 +502,14 @@ struct ShotCameraView: View {
 
     private var bottomControls: some View {
         VStack(spacing: 14) {
+            if let warningText, !isBusy || thermal == .critical {
+                Label(warningText, systemImage: thermal == .nominal || thermal == .fair ? "battery.25" : "thermometer.sun.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.leading)
+                    .padding(10)
+                    .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
+                    .foregroundStyle(Color.orange)
+            }
             if let markNote {
                 Label(markNote, systemImage: "star.fill")
                     .font(.headline)
@@ -674,11 +760,16 @@ struct ShotCameraView: View {
         if let coordinate = location.location?.coordinate {
             lowLight = SunCalc.elevation(at: Date(), latitude: coordinate.latitude, longitude: coordinate.longitude).degrees < 0
         }
-        take = store.nextTake(tripID: tripID, shot: shot)
+        take = store.nextTake(tripID: tripID, shot: shot, day: day)
         variant = variantFor(take: take)
         timing = TimingStore.load(shot, plan: plan)
-        showBriefing = plan.isInShot
+        showBriefing = plan.isInShot && !autoStart
         level.start()
+        UIDevice.current.isBatteryMonitoringEnabled = true
+        readBattery()
+        if shot == .matchCut {
+            loadGhost()
+        }
         if let minutes = store.minutesOfVideoLeft, minutes < 10 {
             message = "Only about \(minutes) minutes of 4K space left. Copy a trip to your SSD soon."
         }
@@ -699,7 +790,109 @@ struct ShotCameraView: View {
         }
         camera.stop()
         level.stop()
+        UIDevice.current.isBatteryMonitoringEnabled = false
         UIApplication.shared.isIdleTimerDisabled = false
+    }
+
+    private func readBattery() {
+        let device = UIDevice.current
+        battery = device.batteryLevel
+        charging = device.batteryState == .charging || device.batteryState == .full
+    }
+
+    /// Each time the camera is ready: put MATCH CUT's zoom back, and start a quick clip straight away.
+    private func cameraReady() {
+        if let ghostZoom, !zoomRestored {
+            zoomRestored = true
+            camera.setZoom(display: ghostZoom)
+        }
+        if autoStart && !autoStarted && reviewClip == nil && !permissionDenied {
+            autoStarted = true
+            beginRecording()
+        }
+    }
+
+    /// MATCH CUT: the most recent one on the phone, from any trip, as a see-through still and its zoom.
+    private func loadGhost() {
+        var newest: (clip: Clip, trip: Trip)? = nil
+        for trip in store.trips {
+            for clip in trip.clips where clip.shot == ShotType.matchCut.rawValue && clip.isOnPhone {
+                if let current = newest, current.clip.recordedAt >= clip.recordedAt {
+                    continue
+                }
+                newest = (clip, trip)
+            }
+        }
+        guard let latest = newest else { return }
+        ghostZoom = latest.clip.zoom
+        let url = store.clipURL(latest.clip, in: latest.trip)
+        Task { @MainActor in
+            ghost = await Self.still(of: url, at: 3)
+        }
+    }
+
+    private static func still(of url: URL, at seconds: Double) async -> UIImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1080, height: 1920)
+        guard let result = try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)) else { return nil }
+        return UIImage(cgImage: result.image)
+    }
+
+    // MARK: Guides drawn over the picture for some creative shots
+
+    @ViewBuilder
+    private var shotGuideOverlay: some View {
+        switch plan.overlay {
+        case .ghost?:
+            ghostOverlay
+        case .sizeBox?:
+            sizeBox
+        case .crosshair?:
+            crosshair
+        case nil:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var ghostOverlay: some View {
+        if let ghost, camera.phase != .recording {
+            Image(uiImage: ghost)
+                .resizable()
+                .scaledToFill()
+                .opacity(0.35)
+                .ignoresSafeArea()
+        }
+    }
+
+    private var sizeBox: some View {
+        RoundedRectangle(cornerRadius: 16)
+            .stroke(Color.yellow.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+            .frame(width: 230, height: 280)
+            .overlay(alignment: .top) {
+                Text("Head and shoulders")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .foregroundStyle(Color.yellow)
+                    .offset(y: -26)
+            }
+    }
+
+    private var crosshair: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.yellow, lineWidth: 2)
+                .frame(width: 46, height: 46)
+            Rectangle()
+                .fill(Color.yellow)
+                .frame(width: 2, height: 76)
+            Rectangle()
+                .fill(Color.yellow)
+                .frame(width: 76, height: 2)
+        }
     }
 
     private func planChanged() {
@@ -778,7 +971,8 @@ struct ShotCameraView: View {
 
     private func beginRecording() {
         let now = Date()
-        guard let url = store.newClipURL(tripID: tripID, shot: shot, take: take, date: now) else {
+        guard let url = store.newClipURL(tripID: tripID, shotName: shot.rawValue, take: take, date: now, day: day,
+                                         fileExtension: "mov") else {
             message = "Couldn't find this trip's folder."
             return
         }
@@ -786,6 +980,13 @@ struct ShotCameraView: View {
         let coordinate = location.location?.coordinate
         zoomStarted = false
         marks = []
+        firedCues = []
+        takeMotion = nil
+        startZoom = camera.displayZoom
+        if used.exposure == .lockAtStart {
+            camera.lockFocusAndExposure()
+        }
+        level.beginTake()
         camera.startRecording(to: url, latitude: coordinate?.latitude, longitude: coordinate?.longitude) { result in
             saveTake(result, plan: used, startedAt: now, latitude: coordinate?.latitude, longitude: coordinate?.longitude)
         }
@@ -810,19 +1011,37 @@ struct ShotCameraView: View {
             zoomStarted = true
             camera.rampZoom(fromDisplay: ramp.from, toDisplay: ramp.to, duration: ramp.duration)
         }
+        // CLONE: the flash blinks when it's time to move to the next spot.
+        for (index, cue) in plan.flashCues.enumerated() where value >= cue && !firedCues.contains(index) {
+            firedCues.insert(index)
+            camera.blinkTorch()
+        }
         if timing.stopsByItself, value >= stopTime {
             camera.stopRecording()
         }
     }
 
     private func saveTake(_ result: RecordingResult?, plan used: ShotPlan, startedAt: Date, latitude: Double?, longitude: Double?) {
-        // Put the zoom back where this shot starts, ready for the next take.
-        camera.setLens(used.lens)
+        // Put the zoom back where this shot starts, ready for the next take. MATCH CUT keeps the zoom it was
+        // filmed at, so the next one lines up.
+        if shot == .matchCut {
+            camera.setZoom(display: startZoom)
+        } else {
+            camera.setLens(used.lens)
+        }
+        if used.exposure == .lockAtStart {
+            camera.resetFocusAndExposure()
+        }
+        let motion = takeMotion ?? level.endTake()
+        takeMotion = nil
         guard let result else {
             message = "That take didn't save. Try again."
             return
         }
         let takeMarks = marks
+        let zoomAtStart = startZoom
+        let check = Self.checkResult(motion, kind: shot.takeCheck(variantName: used.variantName), onTripod: used.isInShot)
+        let prefill = Self.nearbyName(in: store.trip(id: tripID), latitude: latitude, longitude: longitude, at: startedAt)
         Task { @MainActor in
             let duration = await Self.duration(of: result.url) ?? result.elapsed
             let light = SunCalc.light(at: startedAt, latitude: latitude, longitude: longitude)
@@ -854,28 +1073,92 @@ struct ShotCameraView: View {
                 tags: tags,
                 favourite: false,
                 notes: "",
-                marks: takeMarks.isEmpty ? nil : takeMarks)
+                marks: takeMarks.isEmpty ? nil : takeMarks,
+                name: prefill,
+                day: day,
+                shake: motion?.shake,
+                tilt: motion?.tilt,
+                check: check?.text,
+                checkPassed: check?.passed,
+                zoom: zoomAtStart)
             store.addClip(clip, to: tripID)
-            reviewClip = clip
+            if prefill != nil {
+                // Named after the spot you're still at, so the file gets the name straight away.
+                store.applyFileName(clipID: clip.id, tripID: tripID)
+            }
+            reviewNote = prefill == nil ? nil : "Same as your last clip here"
+            if shot == .matchCut, let saved = store.trip(id: tripID)?.clips.first(where: { $0.id == clip.id }),
+               let trip = store.trip(id: tripID) {
+                ghostZoom = zoomAtStart
+                ghost = await Self.still(of: store.clipURL(saved, in: trip), at: 3)
+            }
+            reviewClip = store.trip(id: tripID)?.clips.first(where: { $0.id == clip.id }) ?? clip
         }
     }
 
+    /// The take check: steady and level, or what went wrong. Small tilts pass, as the edit can straighten them.
+    static func checkResult(_ motion: TakeMotion?, kind: TakeCheckKind, onTripod: Bool) -> (text: String, passed: Bool)? {
+        guard kind != .none, let motion else { return nil }
+        var problems: [String] = []
+        var passed = true
+        if motion.shake > (onTripod ? 3.0 : 6.0) {
+            problems.append(onTripod ? "the tripod moved or shook" : "shaky")
+            passed = false
+        } else if motion.shake > (onTripod ? 1.2 : 3.0) {
+            problems.append(onTripod ? "the tripod wobbled a little" : "a bit shaky")
+            passed = false
+        }
+        var tiltNote: String? = nil
+        if kind == .steadyAndLevel, let tilt = motion.tilt, abs(tilt) >= 2 {
+            let degrees = Int(abs(tilt).rounded())
+            if abs(tilt) >= 5 {
+                problems.append("tilted \(degrees)°")
+                passed = false
+            } else {
+                tiltNote = "Tilted \(degrees)°, which the edit can straighten."
+            }
+        }
+        if problems.isEmpty {
+            let base = kind == .steadyAndLevel && tiltNote == nil ? "Steady and level" : "Steady"
+            return (tiltNote.map { base + ". " + $0 } ?? base, true)
+        }
+        let joined = problems.joined(separator: " and ")
+        let first: String = joined.prefix(1).uppercased()
+        let rest = String(joined.dropFirst())
+        return (first + rest + ". Another take?", passed)
+    }
+
+    /// The name of the last named clip, if you're still near it: within 300 m, or within 20 minutes
+    /// when there's no location. Walk on to somewhere new and the name box starts empty.
+    static func nearbyName(in trip: Trip?, latitude: Double?, longitude: Double?, at date: Date) -> String? {
+        guard let trip else { return nil }
+        let named = trip.clips.filter { $0.displayName != nil }
+        guard let last = named.max(by: { $0.recordedAt < $1.recordedAt }), let name = last.displayName else { return nil }
+        if let latitude, let longitude, let lastLatitude = last.latitude, let lastLongitude = last.longitude {
+            let here = CLLocation(latitude: latitude, longitude: longitude)
+            let there = CLLocation(latitude: lastLatitude, longitude: lastLongitude)
+            return here.distance(from: there) <= 300 ? name : nil
+        }
+        return date.timeIntervalSince(last.recordedAt) < 20 * 60 ? name : nil
+    }
+
     private func reviewDismissed() {
-        take = store.nextTake(tripID: tripID, shot: shot)
+        take = store.nextTake(tripID: tripID, shot: shot, day: day)
         variant = variantFor(take: take)
-        guard let trip = store.trip(id: tripID) else { return }
+        reviewNote = nil
+        guard let trip = store.trip(id: tripID), shot != .quick else { return }
         if let fixedVariant {
             // One half of a transition: done once that half has a take.
             let half = ShotSlot(shot: shot, half: fixedVariant)
-            if half.takeCount(in: trip) >= half.target, let name = half.variantName {
+            if half.takeCount(in: trip, day: day) >= 1, let name = half.variantName {
                 message = "\(name) half done. Film another, or tap ✕ to pick the next shot."
             }
             return
         }
-        let count = trip.takeCount(of: shot)
-        if count >= shot.targetTakes {
-            let noun = shot.targetTakes == 1 ? "take" : "takes"
-            message = "All \(shot.targetTakes) \(noun) done. Film an extra, or tap ✕ to pick the next shot."
+        let target = tripType.target(for: shot)
+        if trip.takeCount(of: shot, day: day) >= target {
+            let noun = target == 1 ? "take" : "takes"
+            message = "All \(target) \(noun) done. Film an extra, or tap ✕ to pick the next shot."
         }
     }
 

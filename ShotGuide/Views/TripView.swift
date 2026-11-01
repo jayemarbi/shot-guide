@@ -20,6 +20,12 @@ struct TripView: View {
     @State private var pickedItems: [PhotosPickerItem] = []
     @State private var importMessage: String? = nil
     @State private var showFacts = false
+    /// The day on screen. nil follows the latest day.
+    @State private var selectedDay: Int? = nil
+    @State private var showStartDay = false
+    @State private var showTypePicker = false
+    /// The last copy to a drive, so its clips can come off the phone.
+    @State private var lastCopy: TripStore.CopySummary? = nil
 
     var body: some View {
         alerts(sheets(page))
@@ -37,8 +43,18 @@ struct TripView: View {
         }
     }
 
+    /// The day on screen: the one you picked, or the latest.
+    private func dayNumber(_ trip: Trip) -> Int {
+        min(selectedDay ?? trip.lastDayNumber, trip.lastDayNumber)
+    }
+
+    private var currentDay: Int {
+        store.trip(id: tripID).map { dayNumber($0) } ?? 1
+    }
+
     private func content(for trip: Trip) -> some View {
         List {
+            daysSection(trip)
             headerSection(trip)
             ForEach(TripPhase.allCases) { phase in
                 phaseSection(phase, trip: trip)
@@ -46,6 +62,7 @@ struct TripView: View {
             importSection
             clipsSection(trip)
         }
+        .onAppear(perform: scheduleLightAlerts)
         .navigationTitle(trip.place)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -68,9 +85,10 @@ struct TripView: View {
     @ViewBuilder
     private func shotScreen(_ slot: ShotSlot) -> some View {
         if slot.shot == .voiceover {
-            VoiceoverView(tripID: tripID)
+            VoiceoverView(tripID: tripID, day: currentDay)
         } else {
-            ShotCameraView(tripID: tripID, shot: slot.shot, fixedVariant: slot.half)
+            ShotCameraView(tripID: tripID, shot: slot.shot, day: currentDay, fixedVariant: slot.half,
+                           autoStart: slot.shot == .quick)
         }
     }
 
@@ -97,11 +115,58 @@ struct TripView: View {
         }
     }
 
+    /// Day 1, Day 2… along the top, and a button to start the next day.
+    private func daysSection(_ trip: Trip) -> some View {
+        let current = dayNumber(trip)
+        return Section {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(trip.allDays) { day in
+                        dayChip(day, selected: day.number == current)
+                    }
+                    addDayChip(next: trip.lastDayNumber + 1)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 2, trailing: 0))
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private func dayChip(_ day: TripDay, selected: Bool) -> some View {
+        Button {
+            selectedDay = day.number
+        } label: {
+            Text(selected ? day.label : "Day \(day.number)")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(selected ? Color.orange : Color.white.opacity(0.1), in: Capsule())
+                .foregroundStyle(selected ? Color.black : Color.white)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func addDayChip(next: Int) -> some View {
+        Button {
+            showStartDay = true
+        } label: {
+            Label("Day \(next)", systemImage: "plus")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(Color.orange.opacity(0.17), in: Capsule())
+                .foregroundStyle(Color.orange)
+        }
+        .buttonStyle(.plain)
+    }
+
     private func headerSection(_ trip: Trip) -> some View {
-        Section {
+        let number = dayNumber(trip)
+        let day = trip.day(number)
+        return Section {
             VStack(alignment: .leading, spacing: 4) {
-                Text(regionText(trip))
-                Text("\(trip.doneTotal) of \(trip.targetTotal) clips")
+                Text(regionText(trip, day: day))
+                Text("\(trip.doneTotal(day: number)) of \(trip.targetTotal(day: number)) clips")
                     .foregroundStyle(.secondary)
                 if store.spaceLeftText != nil {
                     spaceLine()
@@ -115,16 +180,62 @@ struct TripView: View {
                         .font(.subheadline)
                 }
             }
+            quickClipRow
+            typeRow(day)
             lightRow(trip)
-            if trip.clips.isEmpty {
+            if trip.clips(onDay: number).isEmpty {
                 Label("Before your first shot, wipe your lens. A smudge softens every shot.", systemImage: "sparkles")
                     .font(.subheadline)
             }
         }
     }
 
-    private func regionText(_ trip: Trip) -> String {
-        [trip.regionLine, trip.continent].filter { !$0.isEmpty }.joined(separator: " · ")
+    private func regionText(_ trip: Trip, day: TripDay) -> String {
+        [day.place, trip.regionLine].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// Straight to recording, for something that won't wait.
+    private var quickClipRow: some View {
+        Button {
+            activeSlot = ShotSlot(shot: .quick, half: nil)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "bolt.fill")
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Quick clip")
+                        .font(.headline)
+                    Text("Starts filming straight away, for moments that won't wait")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .foregroundStyle(Color.orange)
+    }
+
+    private func typeRow(_ day: TripDay) -> some View {
+        Button {
+            showTypePicker = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: day.type.symbol)
+                    .frame(width: 28)
+                    .foregroundStyle(Color.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(day.type.title)
+                        .font(.headline)
+                    Text("Trip type for day \(day.number) · tap to change")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(Color.primary)
     }
 
     /// The light right now, so you know when to save the shots worth taking your time over.
@@ -139,9 +250,10 @@ struct TripView: View {
     }
 
     private func phaseSection(_ phase: TripPhase, trip: Trip) -> some View {
-        Section {
+        let number = dayNumber(trip)
+        return Section {
             ForEach(phase.slots) { slot in
-                slotRow(slot, trip: trip)
+                slotRow(slot, trip: trip, day: number)
             }
             if phase.showsTripFacts {
                 factsRow(trip)
@@ -168,9 +280,10 @@ struct TripView: View {
 
     @ViewBuilder
     private func clipsSection(_ trip: Trip) -> some View {
-        if !trip.clips.isEmpty {
+        let dayClips = trip.clips(onDay: dayNumber(trip)).sorted { $0.recordedAt > $1.recordedAt }
+        if !dayClips.isEmpty {
             Section {
-                ForEach(trip.clips.sorted { $0.recordedAt > $1.recordedAt }) { clip in
+                ForEach(dayClips) { clip in
                     Button {
                         selectedClip = clip
                     } label: {
@@ -180,8 +293,8 @@ struct TripView: View {
             } header: {
                 Text("Clips")
             } footer: {
-                Text("Tap a clip to tag it or star it. Export trip makes cutouts and captions for editing, then copies everything "
-                    + "to your SSD, sorted into continent, country and state folders. Keep the app open while it works.")
+                Text("Tap a clip to rename, tag or star it. Export trip makes cutouts and captions for editing, then copies "
+                    + "everything to your SSD, sorted into continent, country and state folders. Keep the app open while it works.")
             }
         }
     }
@@ -190,6 +303,14 @@ struct TripView: View {
         view
             .sheet(isPresented: $showFacts) {
                 TripFactsView(tripID: tripID)
+            }
+            .sheet(isPresented: $showStartDay) {
+                StartDaySheet(tripID: tripID) { number in
+                    selectedDay = number
+                }
+            }
+            .sheet(isPresented: $showTypePicker) {
+                TypePickerSheet(tripID: tripID, day: currentDay)
             }
             .sheet(item: $selectedClip) { clip in
                 ReviewView(tripID: tripID, clipID: clip.id, autoplay: false, preselectSuggestions: false, title: "Clip")
@@ -211,6 +332,9 @@ struct TripView: View {
     private func alerts<Page: View>(_ view: Page) -> some View {
         view
             .alert("Trip copied", isPresented: showing($copiedMessage)) {
+                if let lastCopy, !lastCopy.verified.isEmpty {
+                    Button("Free up space") { freeUpSpace(lastCopy) }
+                }
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(copiedMessage ?? "")
@@ -263,6 +387,26 @@ struct TripView: View {
         return Text(text).foregroundStyle(colour)
     }
 
+    /// Golden hour, sunset and blue hour alerts, for a trip you're filming now.
+    private func scheduleLightAlerts() {
+        guard let trip = store.trip(id: tripID) else { return }
+        let now = Date()
+        let lastDay = trip.day(trip.lastDayNumber)
+        let filmingNow = now.timeIntervalSince(lastDay.startedAt) < 30 * 3600
+            || trip.clips.contains { now.timeIntervalSince($0.recordedAt) < 12 * 3600 }
+        guard filmingNow else { return }
+        let coordinate = location.location?.coordinate
+        guard let latitude = coordinate?.latitude ?? lastDay.latitude ?? trip.latitude,
+              let longitude = coordinate?.longitude ?? lastDay.longitude ?? trip.longitude else { return }
+        LightAlerts.schedule(place: lastDay.place, latitude: latitude, longitude: longitude)
+    }
+
+    /// Takes the clips that are safely on the drive off the phone. The trip still lists them.
+    private func freeUpSpace(_ copy: TripStore.CopySummary) {
+        store.freeUpSpace(tripID: tripID, verified: copy.verified)
+        lastCopy = nil
+    }
+
     private static let factsHint = "Distance, time, cost, tips: for on-screen text and guide reels"
 
     private func factsRow(_ trip: Trip) -> some View {
@@ -297,22 +441,27 @@ struct TripView: View {
         copyProgress = "Adding from Photos…"
         UIApplication.shared.isIdleTimerDisabled = true
         Task { @MainActor in
-            let added = await MediaImporter.importItems(items, tripID: tripID, store: store) { copyProgress = $0 }
+            let added = await MediaImporter.importItems(items, tripID: tripID, day: currentDay, store: store) { copyProgress = $0 }
             endExport()
             if added == items.count {
                 importMessage = added == 1
-                    ? "Added to the trip with its time, place and suggested tags. Tap it under Clips to check the tags."
-                    : "All \(added) added to the trip with their times, places and suggested tags. Tap each under Clips to check the tags."
+                    ? "Added to the trip with its time, place and suggested tags. Tap it under Clips to pick its shot type and check the tags."
+                    : "All \(added) added to the trip with their times, places and suggested tags. "
+                        + "Tap each under Clips to pick its shot type and check the tags."
             } else {
                 importMessage = "\(added) of \(items.count) added. The rest couldn't be read."
             }
         }
     }
 
-    private func slotRow(_ slot: ShotSlot, trip: Trip) -> some View {
+    private func slotRow(_ slot: ShotSlot, trip: Trip, day: Int) -> some View {
         let shot = slot.shot
-        let count = slot.takeCount(in: trip)
-        let done = count >= slot.target
+        let type = trip.day(day).type
+        let count = slot.takeCount(in: trip, day: day)
+        let target = slot.target(for: type)
+        let summary = slot.summary(for: type)
+        let counts = slot.counts(for: type)
+        let done = count >= target
         return Button {
             activeSlot = slot
         } label: {
@@ -323,12 +472,12 @@ struct TripView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(slot.title)
                         .font(.headline)
-                    Text(shot.countsTowardTotal ? slot.summary : slot.summary + " · extra")
+                    Text(counts ? summary : summary + " · extra")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("\(count)/\(slot.target)")
+                Text("\(count)/\(target)")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(done ? Color.green : Color.secondary)
                 if done {
@@ -380,6 +529,7 @@ struct TripView: View {
                 endExport()
                 switch result {
                 case .success(let summary):
+                    lastCopy = summary
                     copiedMessage = Self.copiedText(summary)
                 case .failure(let error):
                     exportError = error.localizedDescription
@@ -402,32 +552,51 @@ struct TripView: View {
             let verb = summary.alreadyThere == 1 ? "was" : "were"
             first = "\(clips(summary.copied)) copied. \(clips(summary.alreadyThere)) already on the drive \(verb) skipped."
         }
-        return first + " They're in \(summary.path).\n\nOnce you've checked them on the drive, you can delete the trip from your phone to free up space."
+        return first + " They're in \(summary.path).\n\nFree up space takes the copied clips off this phone. "
+            + "The trip keeps its shot list, names and counts."
     }
 }
 
 struct ClipRow: View {
     let clip: Clip
 
+    private var shotLine: String {
+        "\(clip.shotType?.title ?? clip.shot) · take \(clip.take)"
+    }
+
+    private var detailLine: String {
+        let tags = clip.tags.isEmpty ? "No tags yet" : clip.tags.joined(separator: ", ")
+        return clip.displayName == nil ? tags : shotLine + " · " + tags
+    }
+
+    private var lengthText: String {
+        clip.isOnPhone ? String(format: "%.0f s", clip.durationSeconds) : "On SSD"
+    }
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text("\(clip.shotType?.title ?? clip.shot) · take \(clip.take)")
+                    Text(clip.displayName ?? shotLine)
                         .font(.subheadline.weight(.semibold))
                     if clip.favourite {
                         Image(systemName: "star.fill")
                             .font(.caption)
                             .foregroundStyle(Color.yellow)
                     }
+                    if clip.checkPassed == false {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color.orange)
+                    }
                 }
-                Text(clip.tags.isEmpty ? "No tags yet" : clip.tags.joined(separator: ", "))
+                Text(detailLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer()
-            Text(String(format: "%.0f s", clip.durationSeconds))
+            Text(lengthText)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
         }

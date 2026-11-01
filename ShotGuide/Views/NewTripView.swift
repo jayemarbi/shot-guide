@@ -18,6 +18,7 @@ struct NewTripView: View {
     @State private var status = "Finding your location…"
     @State private var lookedUp = false
     @State private var errorText: String? = nil
+    @State private var tripType: TripType = .general
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,14 @@ struct NewTripView: View {
                             place = suggestedPlace
                         }
                     }
+                }
+
+                Section {
+                    TripTypeList(selection: $tripType)
+                } header: {
+                    Text("Trip type")
+                } footer: {
+                    Text("Tunes the shot list and the tips. Staying longer? Add days as you go, from the trip page.")
                 }
 
                 Section {
@@ -77,7 +86,7 @@ struct NewTripView: View {
                 } header: {
                     Text("File names")
                 } footer: {
-                    Text("Clips will be named like \(previewName)")
+                    Text("Clips will be named like \(previewName), ending with the name you give each clip.")
                 }
 
                 if let errorText {
@@ -137,7 +146,8 @@ struct NewTripView: View {
 
     private var previewName: String {
         let code = fileCode.isEmpty ? "Trip" : TripStore.fileCode(for: fileCode)
-        return TripStore.clipName(code: code, day: TripStore.dayString(Date(), timeZone: .current), shot: .reveal, take: 1)
+        return TripStore.clipName(code: code, day: TripStore.dayString(Date(), timeZone: .current), shotName: ShotType.wide.rawValue,
+                                  take: 1, name: "Lower Falls", fileExtension: "mov")
     }
 
     private func lookUp(_ found: CLLocation) {
@@ -172,7 +182,8 @@ struct NewTripView: View {
                 countryCode: countryCode,
                 continent: continent,
                 latitude: coordinate?.latitude,
-                longitude: coordinate?.longitude)
+                longitude: coordinate?.longitude,
+                type: tripType)
             onCreated(trip)
         } catch {
             errorText = "Couldn't create the trip folder: \(error.localizedDescription)"

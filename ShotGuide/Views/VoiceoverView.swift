@@ -6,6 +6,7 @@ import UIKit
 /// recording and how loud you are, then plays it back so you can tag or redo it.
 struct VoiceoverView: View {
     let tripID: UUID
+    let day: Int
 
     @EnvironmentObject var store: TripStore
     @EnvironmentObject var location: LocationService
@@ -108,7 +109,7 @@ struct VoiceoverView: View {
             }
         }
         .onAppear {
-            take = store.nextTake(tripID: tripID, shot: .voiceover)
+            take = store.nextTake(tripID: tripID, shot: .voiceover, day: day)
             recorder.prepare()
             UIApplication.shared.isIdleTimerDisabled = true
         }
@@ -122,7 +123,7 @@ struct VoiceoverView: View {
             }
         }
         .sheet(item: $reviewClip, onDismiss: {
-            take = store.nextTake(tripID: tripID, shot: .voiceover)
+            take = store.nextTake(tripID: tripID, shot: .voiceover, day: day)
         }) { clip in
             ReviewView(tripID: tripID, clipID: clip.id, autoplay: true, preselectSuggestions: false, title: "VOICEOVER · take \(clip.take)")
         }
@@ -136,7 +137,7 @@ struct VoiceoverView: View {
         message = nil
         let now = Date()
         guard let url = store.newClipURL(tripID: tripID, shotName: ShotType.voiceover.rawValue, take: take, date: now,
-                                         fileExtension: "m4a") else {
+                                         day: day, fileExtension: "m4a") else {
             message = "Couldn't find this trip's folder."
             return
         }
@@ -174,7 +175,8 @@ struct VoiceoverView: View {
             inShot: false,
             tags: [],
             favourite: false,
-            notes: "")
+            notes: "",
+            day: day)
         store.addClip(clip, to: tripID)
         reviewClip = clip
     }

@@ -9,6 +9,13 @@ struct TripListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                if let expiry = InstallInfo.expiry {
+                    Section {
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            InstallLine(expiry: expiry, now: context.date)
+                        }
+                    }
+                }
                 if store.trips.isEmpty {
                     Section {
                         VStack(alignment: .leading, spacing: 8) {
@@ -84,7 +91,7 @@ struct TripRow: View {
                     .foregroundStyle(.secondary)
             }
             HStack {
-                Text(trip.createdAt, style: .date)
+                Text(trip.dateLine)
                 Spacer()
                 Text("\(trip.doneTotal) of \(trip.targetTotal) clips")
             }
@@ -92,5 +99,33 @@ struct TripRow: View {
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// When this install stops opening: a quiet line, turning orange in the last two days so you reinstall in time.
+struct InstallLine: View {
+    let expiry: Date
+    let now: Date
+
+    var body: some View {
+        if expiry.timeIntervalSince(now) <= 2 * 86400 {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "hourglass")
+                    .frame(width: 28)
+                    .foregroundStyle(Color.orange)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(InstallInfo.urgentTitle(expiry: expiry, now: now))
+                        .font(.headline)
+                        .foregroundStyle(Color.orange)
+                    Text("Reinstall from the PC before your next trip. Your trips and clips stay.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            Label("This install runs out " + InstallInfo.dayAndTime(expiry), systemImage: "hourglass")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
     }
 }

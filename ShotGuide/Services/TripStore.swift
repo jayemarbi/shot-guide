@@ -77,7 +77,7 @@ final class TripStore: ObservableObject {
 
     @discardableResult
     func createTrip(place: String, fileCode: String, state: String, countryCode: String, continent: String,
-                    latitude: Double?, longitude: Double?) throws -> Trip {
+                    latitude: Double?, longitude: Double?, type: TripType) throws -> Trip {
         let now = Date()
         let country = countryCode.isEmpty ? "" : GeoData.countryName(countryCode)
         let day = Self.dayString(now, timeZone: .current)
@@ -95,9 +95,10 @@ final class TripStore: ObservableObject {
             relative = (parents + [folderName]).joined(separator: "/")
             counter += 1
         }
-        let trip = Trip(
+        let code = Self.fileCode(for: fileCode.isEmpty ? place : fileCode)
+        var trip = Trip(
             place: place,
-            fileCode: Self.fileCode(for: fileCode.isEmpty ? place : fileCode),
+            fileCode: code,
             state: state,
             country: country,
             countryCode: countryCode,
@@ -106,6 +107,8 @@ final class TripStore: ObservableObject {
             longitude: longitude,
             createdAt: now,
             folderPath: relative)
+        trip.days = [TripDay(number: 1, startedAt: now, place: place, fileCode: code, type: type,
+                             latitude: latitude, longitude: longitude)]
         try write(trip)
         trips.insert(trip, at: 0)
         return trip
@@ -123,37 +126,141 @@ final class TripStore: ObservableObject {
         replace(trip)
     }
 
+    // MARK: Days
+
+    /// Starts the next day: at the same place as the day before, or at a new one (`place`), with its own type.
+    /// Returns the new day's number.
+    @discardableResult
+    func addDay(tripID: UUID, place: String?, type: TripType, latitude: Double?, longitude: Double?) -> Int? {
+        guard var trip = self.trip(id: tripID) else { return nil }
+        var days = trip.allDays
+        guard let last = days.last else { return nil }
+        let number = last.number + 1
+        let newPlace = (place ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let day: TripDay
+        if newPlace.isEmpty {
+            day = TripDay(number: number, startedAt: Date(), place: last.place, fileCode: last.fileCode, type: type,
+                          latitude: latitude ?? last.latitude, longitude: longitude ?? last.longitude)
+        } else {
+            day = TripDay(number: number, startedAt: Date(), place: newPlace, fileCode: Self.fileCode(for: newPlace), type: type,
+                          latitude: latitude, longitude: longitude)
+        }
+        days.append(day)
+        trip.days = days
+        replace(trip)
+        return number
+    }
+
+    func setType(_ type: TripType, day number: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        var days = trip.allDays
+        guard let index = days.firstIndex(where: { $0.number == number }) else { return }
+        days[index].type = type
+        trip.days = days
+        replace(trip)
+    }
+
     // MARK: Clips
 
-    func nextTake(tripID: UUID, shot: ShotType) -> Int {
-        nextTake(tripID: tripID, shotName: shot.rawValue)
+    /// Takes are numbered day by day, so each day starts again at take 1.
+    func nextTake(tripID: UUID, shot: ShotType, day: Int) -> Int {
+        nextTake(tripID: tripID, shotName: shot.rawValue, day: day)
     }
 
-    func nextTake(tripID: UUID, shotName: String) -> Int {
+    func nextTake(tripID: UUID, shotName: String, day: Int) -> Int {
         guard let trip = self.trip(id: tripID) else { return 1 }
-        return (trip.clips.filter { $0.shot == shotName }.map { $0.take }.max() ?? 0) + 1
+        return (trip.clips.filter { $0.shot == shotName && $0.dayNumber == day }.map { $0.take }.max() ?? 0) + 1
     }
 
-    /// Where the next clip goes, named the playbook way: Place_YYYY-MM-DD_SHOT_##.mov
-    func newClipURL(tripID: UUID, shot: ShotType, take: Int, date: Date) -> URL? {
-        newClipURL(tripID: tripID, shotName: shot.rawValue, take: take, date: date, fileExtension: "mov")
-    }
-
-    /// The same naming for anything else: a VOICEOVER .m4a, or a photo or video added from Photos.
-    func newClipURL(tripID: UUID, shotName: String, take: Int, date: Date, fileExtension: String) -> URL? {
+    /// Where the next clip goes, named the playbook way: Place_YYYY-MM-DD_SHOT_##.mov, with the clip's name on
+    /// the end once it has one. The place is the day's, so a day somewhere new is named after where you are.
+    func newClipURL(tripID: UUID, shotName: String, take: Int, date: Date, day: Int, fileExtension: String) -> URL? {
         guard let trip = self.trip(id: tripID) else { return nil }
         let folder = folderURL(for: trip)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let day = Self.dayString(date, timeZone: .current)
+        let code = trip.day(day).fileCode
+        let dateText = Self.dayString(date, timeZone: .current)
         var number = take
         var url = folder.appendingPathComponent(
-            Self.clipName(code: trip.fileCode, day: day, shotName: shotName, take: number, fileExtension: fileExtension))
+            Self.clipName(code: code, day: dateText, shotName: shotName, take: number, fileExtension: fileExtension))
         while FileManager.default.fileExists(atPath: url.path) {
             number += 1
             url = folder.appendingPathComponent(
-                Self.clipName(code: trip.fileCode, day: day, shotName: shotName, take: number, fileExtension: fileExtension))
+                Self.clipName(code: code, day: dateText, shotName: shotName, take: number, fileExtension: fileExtension))
         }
         return url
+    }
+
+    /// The file name a clip should have, from its day, date, shot, take and name.
+    func expectedFileName(for clip: Clip, in trip: Trip) -> String {
+        let zone = TimeZone(identifier: clip.timeZoneID) ?? .current
+        let fileExtension = (clip.fileName as NSString).pathExtension
+        return Self.clipName(
+            code: trip.day(clip.dayNumber).fileCode,
+            day: Self.dayString(clip.recordedAt, timeZone: zone),
+            shotName: clip.shot,
+            take: clip.take,
+            name: clip.displayName,
+            fileExtension: fileExtension.isEmpty ? "mov" : fileExtension)
+    }
+
+    /// Renames a clip's files, with its cutout mask and captions, to match its shot, take and name.
+    /// The copy on the SSD is renamed to match the next time the trip is copied.
+    func applyFileName(clipID: UUID, tripID: UUID) {
+        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }) else { return }
+        var clip = trip.clips[index]
+        let wanted = expectedFileName(for: clip, in: trip)
+        guard wanted != clip.fileName else { return }
+        let folder = folderURL(for: trip)
+        let fileManager = FileManager.default
+        var newName = wanted
+        if clip.isOnPhone {
+            newName = Self.freeName(wanted, in: folder)
+            do {
+                try fileManager.moveItem(at: folder.appendingPathComponent(clip.fileName), to: folder.appendingPathComponent(newName))
+            } catch {
+                return
+            }
+        }
+        let newBase = (newName as NSString).deletingPathExtension
+        if let mask = clip.maskFileName {
+            let newMask = newBase + "_mask.mov"
+            try? fileManager.moveItem(at: folder.appendingPathComponent(mask), to: folder.appendingPathComponent(newMask))
+            clip.maskFileName = newMask
+        }
+        if let captions = clip.captionsFileName {
+            let newCaptions = newBase + ".srt"
+            try? fileManager.moveItem(at: folder.appendingPathComponent(captions), to: folder.appendingPathComponent(newCaptions))
+            clip.captionsFileName = newCaptions
+        }
+        clip.fileName = newName
+        trip.clips[index] = clip
+        replace(trip)
+    }
+
+    /// Gives a clip added from Photos a shot type, like TIMELAPSE, so it sorts and counts with the rest.
+    func setShot(_ shotName: String, clipID: UUID, tripID: UUID) {
+        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }),
+              trip.clips[index].shot != shotName else { return }
+        let day = trip.clips[index].dayNumber
+        let others = trip.clips.filter { $0.shot == shotName && $0.dayNumber == day && $0.id != clipID }
+        trip.clips[index].shot = shotName
+        trip.clips[index].take = (others.map { $0.take }.max() ?? 0) + 1
+        replace(trip)
+        applyFileName(clipID: clipID, tripID: tripID)
+    }
+
+    /// `wanted`, or wanted-2, wanted-3… if a file of that name is already in the folder.
+    static func freeName(_ wanted: String, in folder: URL) -> String {
+        let base = (wanted as NSString).deletingPathExtension
+        let fileExtension = (wanted as NSString).pathExtension
+        var candidate = wanted
+        var counter = 2
+        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(candidate).path) {
+            candidate = "\(base)-\(counter).\(fileExtension)"
+            counter += 1
+        }
+        return candidate
     }
 
     /// Free space on the phone, in bytes.
@@ -212,6 +319,8 @@ final class TripStore: ObservableObject {
         let path: String
         let copied: Int
         let alreadyThere: Int
+        /// Media files now safely on the drive (same size as on the phone), so they can come off the phone.
+        let verified: Set<String>
     }
 
     /// Copies a trip onto a drive or folder you pick, such as an SSD plugged into the phone, into
@@ -237,6 +346,8 @@ final class TripStore: ObservableObject {
                     : picked.appendingPathComponent(Self.exportFolderName, isDirectory: true)
                 let target = root.appendingPathComponent(inside, isDirectory: true)
                 try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+                // Clips renamed since the last copy are renamed on the drive too, rather than copied again.
+                Self.applyRenames(for: trip, at: target)
 
                 // Videos first and the catalogue last, so the catalogue on the drive never lists a missing clip.
                 let items = try fileManager.contentsOfDirectory(
@@ -253,6 +364,7 @@ final class TripStore: ObservableObject {
 
                 var copied = 0
                 var alreadyThere = 0
+                var verified: Set<String> = []
                 for (index, item) in items.enumerated() {
                     DispatchQueue.main.async { progress(index + 1, items.count) }
                     let copy = target.appendingPathComponent(item.lastPathComponent)
@@ -262,6 +374,7 @@ final class TripStore: ObservableObject {
                             if Self.isClip(item) {
                                 alreadyThere += 1
                             }
+                            verified.insert(item.lastPathComponent)
                             continue
                         }
                         try fileManager.removeItem(at: copy)
@@ -270,15 +383,72 @@ final class TripStore: ObservableObject {
                     if Self.isClip(item) {
                         copied += 1
                     }
+                    if Self.isVideo(item), Self.fileSize(item) == Self.fileSize(copy) {
+                        verified.insert(item.lastPathComponent)
+                    }
                 }
 
                 let parts = [root.lastPathComponent] + inside.split(separator: "/").map(String.init)
-                let summary = CopySummary(path: parts.joined(separator: " › "), copied: copied, alreadyThere: alreadyThere)
+                let summary = CopySummary(path: parts.joined(separator: " › "), copied: copied, alreadyThere: alreadyThere,
+                                          verified: verified)
                 DispatchQueue.main.async { completion(.success(summary)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
         }
+    }
+
+    /// Reads the trip.json left on the drive by the last copy, and renames any clip (with its mask and captions)
+    /// whose name has changed since, so the drive doesn't end up with both names.
+    private static func applyRenames(for trip: Trip, at target: URL) {
+        let fileManager = FileManager.default
+        guard let data = try? Data(contentsOf: target.appendingPathComponent("trip.json")) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let onDrive = try? decoder.decode(Trip.self, from: data) else { return }
+        var before: [UUID: Clip] = [:]
+        for clip in onDrive.clips {
+            before[clip.id] = clip
+        }
+        for clip in trip.clips {
+            guard let old = before[clip.id] else { continue }
+            let pairs: [(String?, String?)] = [
+                (old.fileName, clip.fileName),
+                (old.maskFileName, clip.maskFileName),
+                (old.captionsFileName, clip.captionsFileName)
+            ]
+            for (from, to) in pairs {
+                guard let from, let to, from != to else { continue }
+                let source = target.appendingPathComponent(from)
+                let destination = target.appendingPathComponent(to)
+                if fileManager.fileExists(atPath: source.path) && !fileManager.fileExists(atPath: destination.path) {
+                    try? fileManager.moveItem(at: source, to: destination)
+                }
+            }
+        }
+    }
+
+    /// After a copy: takes the clips (and their cutout masks) that are safely on the drive off the phone.
+    /// The trip keeps listing them, with their names, tags and counts. Returns how many clips came off.
+    @discardableResult
+    func freeUpSpace(tripID: UUID, verified: Set<String>) -> Int {
+        guard var trip = self.trip(id: tripID) else { return 0 }
+        let folder = folderURL(for: trip)
+        var removed = 0
+        for index in trip.clips.indices {
+            let clip = trip.clips[index]
+            guard clip.isOnPhone, verified.contains(clip.fileName) else { continue }
+            // A mask that didn't make it to the drive keeps its clip on the phone too, for the next copy.
+            if let mask = clip.maskFileName, !verified.contains(mask) { continue }
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(clip.fileName))
+            if let mask = clip.maskFileName {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(mask))
+            }
+            trip.clips[index].removedFromPhone = true
+            removed += 1
+        }
+        replace(trip)
+        return removed
     }
 
     /// "Library/Oceania/Australia/Queensland/2026-11-08 Mount Barney" becomes "Oceania/Australia/Queensland/2026-11-08 Mount Barney".
@@ -354,12 +524,23 @@ final class TripStore: ObservableObject {
 
     // MARK: Names, dates and the catalogue
 
-    static func clipName(code: String, day: String, shot: ShotType, take: Int) -> String {
-        clipName(code: code, day: day, shotName: shot.rawValue, take: take, fileExtension: "mov")
+    static func clipName(code: String, day: String, shotName: String, take: Int, name: String? = nil,
+                         fileExtension: String) -> String {
+        var base = "\(code)_\(day)_\(shotName)_\(String(format: "%02d", take))"
+        let slug = name.map { nameSlug($0) } ?? ""
+        if !slug.isEmpty {
+            base += "_" + slug
+        }
+        return base + "." + fileExtension
     }
 
-    static func clipName(code: String, day: String, shotName: String, take: Int, fileExtension: String) -> String {
-        "\(code)_\(day)_\(shotName)_\(String(format: "%02d", take)).\(fileExtension)"
+    /// "Lower Falls" becomes "Lower-Falls": letters, numbers and hyphens only, so it works on any drive.
+    static func nameSlug(_ text: String) -> String {
+        let plain = text.folding(options: .diacriticInsensitive, locale: Locale(identifier: "en_US_POSIX"))
+        let words = plain.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+        let joined = words.joined(separator: "-")
+        let ascii = joined.unicodeScalars.filter { $0.isASCII }.map { String($0) }.joined()
+        return String(ascii.prefix(40)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 
     /// "Mount Barney" becomes "MountBarney". Accents are dropped so names work everywhere.
@@ -402,44 +583,61 @@ final class TripStore: ObservableObject {
     static let catalogColumns = [
         "file", "place", "state", "country", "continent", "latitude", "longitude", "date", "time", "light",
         "shot", "take", "in_shot", "lens", "fps", "resolution", "length_s", "tags", "favourite", "notes",
-        "variant", "mask_file", "captions_file", "transcript", "marks_s"
+        "variant", "mask_file", "captions_file", "transcript", "marks_s",
+        "name", "trip", "day", "trip_type", "shake_dps", "tilt_deg", "take_check", "zoom", "on_phone"
     ]
 
     static func catalogCSV(for trip: Trip) -> String {
         var lines = [catalogColumns.joined(separator: ",")]
         for clip in trip.clips.sorted(by: { $0.recordedAt < $1.recordedAt }) {
-            let zone = TimeZone(identifier: clip.timeZoneID) ?? .current
-            let row: [String] = [
-                clip.fileName,
-                trip.place,
-                trip.state,
-                trip.country,
-                trip.continent,
-                clip.latitude.map { String(format: "%.6f", $0) } ?? "",
-                clip.longitude.map { String(format: "%.6f", $0) } ?? "",
-                dayString(clip.recordedAt, timeZone: zone),
-                timeString(clip.recordedAt, timeZone: zone),
-                clip.light,
-                clip.shot,
-                String(clip.take),
-                clip.inShot ? "yes" : "no",
-                clip.lens,
-                String(clip.fps),
-                clip.resolution,
-                String(format: "%.1f", clip.durationSeconds),
-                clip.tags.joined(separator: "; "),
-                clip.favourite ? "yes" : "no",
-                clip.notes,
-                clip.variant ?? "",
-                clip.maskFileName ?? "",
-                clip.captionsFileName ?? "",
-                clip.transcript ?? "",
-                (clip.marks ?? []).map { String(format: "%.1f", $0) }.joined(separator: "; ")
-            ]
-            lines.append(row.map { csvField($0) }.joined(separator: ","))
+            lines.append(catalogRow(clip, trip: trip).map { csvField($0) }.joined(separator: ","))
         }
         // The byte-order mark makes Excel on Windows read accents correctly.
         return "\u{FEFF}" + lines.joined(separator: "\r\n") + "\r\n"
+    }
+
+    private static func catalogRow(_ clip: Clip, trip: Trip) -> [String] {
+        let zone = TimeZone(identifier: clip.timeZoneID) ?? .current
+        let day = trip.day(clip.dayNumber)
+        let first: [String] = [
+            clip.fileName,
+            day.place,
+            trip.state,
+            trip.country,
+            trip.continent,
+            clip.latitude.map { String(format: "%.6f", $0) } ?? "",
+            clip.longitude.map { String(format: "%.6f", $0) } ?? "",
+            dayString(clip.recordedAt, timeZone: zone),
+            timeString(clip.recordedAt, timeZone: zone),
+            clip.light,
+            clip.shot,
+            String(clip.take),
+            clip.inShot ? "yes" : "no",
+            clip.lens,
+            String(clip.fps),
+            clip.resolution,
+            String(format: "%.1f", clip.durationSeconds),
+            clip.tags.joined(separator: "; "),
+            clip.favourite ? "yes" : "no",
+            clip.notes,
+            clip.variant ?? "",
+            clip.maskFileName ?? "",
+            clip.captionsFileName ?? "",
+            clip.transcript ?? "",
+            (clip.marks ?? []).map { String(format: "%.1f", $0) }.joined(separator: "; ")
+        ]
+        let added: [String] = [
+            clip.displayName ?? "",
+            trip.place,
+            String(clip.dayNumber),
+            day.type.rawValue,
+            clip.shake.map { String(format: "%.2f", $0) } ?? "",
+            clip.tilt.map { String(format: "%.1f", $0) } ?? "",
+            clip.check ?? "",
+            clip.zoom.map { String(format: "%.1f", $0) } ?? "",
+            clip.isOnPhone ? "yes" : "no"
+        ]
+        return first + added
     }
 
     static func csvField(_ value: String) -> String {

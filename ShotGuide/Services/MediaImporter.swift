@@ -51,7 +51,7 @@ enum MediaImporter {
 
     /// Returns how many items were added.
     @MainActor
-    static func importItems(_ items: [PhotosPickerItem], tripID: UUID, store: TripStore,
+    static func importItems(_ items: [PhotosPickerItem], tripID: UUID, day: Int, store: TripStore,
                             status: @escaping (String) -> Void) async -> Int {
         var added = 0
         for (index, item) in items.enumerated() {
@@ -66,7 +66,7 @@ enum MediaImporter {
                 }
                 guard let source else { continue }
                 defer { try? FileManager.default.removeItem(at: source) }
-                if try await add(source, isMovie: isMovie, tripID: tripID, store: store) {
+                if try await add(source, isMovie: isMovie, tripID: tripID, day: day, store: store) {
                     added += 1
                 }
             } catch {
@@ -77,15 +77,15 @@ enum MediaImporter {
     }
 
     @MainActor
-    private static func add(_ source: URL, isMovie: Bool, tripID: UUID, store: TripStore) async throws -> Bool {
+    private static func add(_ source: URL, isMovie: Bool, tripID: UUID, day: Int, store: TripStore) async throws -> Bool {
         guard let trip = store.trip(id: tripID) else { return false }
         let info = isMovie ? await movieInfo(source) : imageInfo(source)
         let date = info.date ?? trip.createdAt
         let latitude = info.latitude ?? trip.latitude
         let longitude = info.longitude ?? trip.longitude
-        let take = store.nextTake(tripID: tripID, shotName: shotName)
+        let take = store.nextTake(tripID: tripID, shotName: shotName, day: day)
         let fileExtension = source.pathExtension.isEmpty ? (isMovie ? "mov" : "jpg") : source.pathExtension.lowercased()
-        guard let destination = store.newClipURL(tripID: tripID, shotName: shotName, take: take, date: date,
+        guard let destination = store.newClipURL(tripID: tripID, shotName: shotName, take: take, date: date, day: day,
                                                  fileExtension: fileExtension) else { return false }
         try FileManager.default.copyItem(at: source, to: destination)
 
@@ -111,7 +111,8 @@ enum MediaImporter {
             inShot: false,
             tags: tags,
             favourite: false,
-            notes: "")
+            notes: "",
+            day: day)
         store.addClip(clip, to: tripID)
         return true
     }

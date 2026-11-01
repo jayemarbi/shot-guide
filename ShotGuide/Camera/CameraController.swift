@@ -6,6 +6,8 @@ struct CaptureConfig: Equatable {
     var fps: Int
     var stabilisation: Stabilisation
     var timelapseInterval: Double?
+    /// Brighter (snow) or darker (silhouettes) than the camera would choose by itself.
+    var exposureBias: Float = 0
 }
 
 struct RecordingResult {
@@ -40,6 +42,8 @@ final class CameraController: NSObject, ObservableObject {
     /// The lens button to highlight. nil after a pinch, when the zoom sits between lenses.
     @Published private(set) var currentLens: LensChoice? = .wide
     @Published private(set) var hasTorch = false
+    /// The zoom on screen right now, like 1 or 2.5.
+    @Published private(set) var displayZoom: Double = 1
 
     let session = AVCaptureSession()
 
@@ -141,6 +145,13 @@ final class CameraController: NSObject, ObservableObject {
            let microphoneInput = try? AVCaptureDeviceInput(device: microphone),
            session.canAddInput(microphoneInput) {
             session.addInput(microphoneInput)
+            // Stereo and wind noise reduction where the phone's own mics support them. A clip-on mic stays as it is.
+            if microphoneInput.isMultichannelAudioModeSupported(.stereo) {
+                microphoneInput.multichannelAudioMode = .stereo
+            }
+            if microphoneInput.isWindNoiseRemovalSupported {
+                microphoneInput.isWindNoiseRemovalEnabled = true
+            }
         }
 
         if isLapse {
@@ -196,10 +207,12 @@ final class CameraController: NSObject, ObservableObject {
             if device.isExposureModeSupported(.continuousAutoExposure) {
                 device.exposureMode = .continuousAutoExposure
             }
-            device.setExposureTargetBias(0, completionHandler: nil)
+            let bias = min(max(config.exposureBias, device.minExposureTargetBias), device.maxExposureTargetBias)
+            device.setExposureTargetBias(bias, completionHandler: nil)
             device.unlockForConfiguration()
         } catch {}
-        exposureBias = 0
+        exposureBias = config.exposureBias
+        let startZoom = Double(device.videoZoomFactor) * Self.displayMultiplier(device)
 
         if !session.isRunning {
             session.startRunning()
@@ -225,6 +238,7 @@ final class CameraController: NSObject, ObservableObject {
             self.formatLabel = formatText
             self.hasTorch = torch
             self.exposureLocked = false
+            self.displayZoom = startZoom
             self.phase = .ready
         }
     }
@@ -242,9 +256,31 @@ final class CameraController: NSObject, ObservableObject {
                 device.unlockForConfiguration()
             } catch {}
             let label = Self.label(for: lens, device: device)
+            let zoom = Double(factor) * Self.displayMultiplier(device)
             DispatchQueue.main.async {
                 self.currentLens = lens
                 self.lensLabel = label
+                self.displayZoom = zoom
+            }
+        }
+    }
+
+    /// Jumps to an on-screen zoom, like 2.5x. MATCH CUT uses it to start where the last one was.
+    func setZoom(display value: Double) {
+        sessionQueue.async {
+            guard let device = self.device else { return }
+            let multiplier = Self.displayMultiplier(device)
+            let factor = Self.clampZoom(CGFloat(value / multiplier), device: device)
+            do {
+                try device.lockForConfiguration()
+                device.videoZoomFactor = factor
+                device.unlockForConfiguration()
+            } catch {}
+            let zoom = Double(factor) * multiplier
+            DispatchQueue.main.async {
+                self.lensLabel = Self.formatZoom(zoom)
+                self.currentLens = nil
+                self.displayZoom = zoom
             }
         }
     }
@@ -265,10 +301,11 @@ final class CameraController: NSObject, ObservableObject {
                 device.videoZoomFactor = factor
                 device.unlockForConfiguration()
             } catch {}
-            let label = Self.formatZoom(Double(factor) * multiplier)
+            let zoom = Double(factor) * multiplier
             DispatchQueue.main.async {
-                self.lensLabel = label
+                self.lensLabel = Self.formatZoom(zoom)
                 self.currentLens = nil
+                self.displayZoom = zoom
             }
         }
     }
@@ -287,8 +324,11 @@ final class CameraController: NSObject, ObservableObject {
                 device.ramp(toVideoZoomFactor: to, withRate: max(rate, 0.05))
                 device.unlockForConfiguration()
             } catch {}
-            let label = Self.formatZoom(Double(to) * multiplier)
-            DispatchQueue.main.async { self.lensLabel = label }
+            let zoom = Double(to) * multiplier
+            DispatchQueue.main.async {
+                self.lensLabel = Self.formatZoom(zoom)
+                self.displayZoom = zoom
+            }
         }
     }
 
@@ -338,6 +378,50 @@ final class CameraController: NSObject, ObservableObject {
                 device.setExposureTargetBias(bias, completionHandler: nil)
                 device.unlockForConfiguration()
             } catch {}
+        }
+    }
+
+    /// Holds focus and exposure where they are, so nothing shifts while you move around the frame (CLONE).
+    func lockFocusAndExposure() {
+        sessionQueue.async {
+            guard let device = self.device else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusModeSupported(.locked) {
+                    device.focusMode = .locked
+                }
+                if device.isExposureModeSupported(.locked) {
+                    device.exposureMode = .locked
+                }
+                device.unlockForConfiguration()
+            } catch {}
+            DispatchQueue.main.async { self.exposureLocked = true }
+        }
+    }
+
+    /// Back to following the scene, after a take that locked focus and exposure.
+    func resetFocusAndExposure() {
+        sessionQueue.async {
+            guard let device = self.device else { return }
+            do {
+                try device.lockForConfiguration()
+                if device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusMode = .continuousAutoFocus
+                }
+                if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                }
+                device.unlockForConfiguration()
+            } catch {}
+            DispatchQueue.main.async { self.exposureLocked = false }
+        }
+    }
+
+    /// A quick blink of the flash, to tell you to move during a take.
+    func blinkTorch() {
+        setTorch(true)
+        sessionQueue.asyncAfter(deadline: .now() + 0.25) {
+            self.setTorch(false)
         }
     }
 

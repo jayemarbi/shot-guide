@@ -1,10 +1,15 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct ShotGuideApp: App {
     @StateObject private var store = TripStore()
     @StateObject private var location = LocationService()
     @StateObject private var tagLibrary = TagLibrary()
+
+    init() {
+        UNUserNotificationCenter.current().delegate = NotificationPresenter.shared
+    }
 
     var body: some Scene {
         WindowGroup {

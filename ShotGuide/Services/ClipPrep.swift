@@ -11,11 +11,11 @@ enum ClipPrep {
     ]
 
     static func needsMask(_ clip: Clip) -> Bool {
-        clip.inShot && clip.shot != ShotType.timelapse.rawValue && clip.maskFileName == nil
+        clip.isOnPhone && clip.inShot && clip.shot != ShotType.timelapse.rawValue && clip.maskFileName == nil
     }
 
     static func needsCaptions(_ clip: Clip) -> Bool {
-        talkingShots.contains(clip.shot) && clip.transcript == nil
+        clip.isOnPhone && talkingShots.contains(clip.shot) && clip.transcript == nil
     }
 
     static func baseName(_ fileName: String) -> String {

@@ -27,8 +27,37 @@ struct Clip: Codable, Identifiable, Hashable {
     var transcript: String? = nil
     /// Seconds into the clip where you tapped Mark during recording.
     var marks: [Double]? = nil
+    /// What you called it, like "Lower Falls". It goes on the end of the file name.
+    var name: String? = nil
+    /// The day of the trip it was filmed on. nil means day 1 (clips from before days existed).
+    var day: Int? = nil
+    /// The take check: how much the phone shook (degrees a second, ignoring slow smooth moves)
+    /// and how far it leaned (degrees, + is clockwise).
+    var shake: Double? = nil
+    var tilt: Double? = nil
+    /// What the take check said, like "Steady and level", and whether the take passed.
+    var check: String? = nil
+    var checkPassed: Bool? = nil
+    /// The zoom on screen when the take started, like 1 or 2.5. MATCH CUT uses it to line up the next one.
+    var zoom: Double? = nil
+    /// The file was removed from the phone after it was copied to the SSD. The trip still lists it.
+    var removedFromPhone: Bool? = nil
 
     var shotType: ShotType? { ShotType(rawValue: shot) }
+
+    var dayNumber: Int { day ?? 1 }
+
+    var isOnPhone: Bool { removedFromPhone != true }
+
+    /// The name, or nil when there isn't one.
+    var displayName: String? {
+        guard let name else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Added from Photos rather than filmed in Shot Guide.
+    var isAdded: Bool { lens.hasPrefix("Added") }
 
     var isPhoto: Bool {
         ["heic", "heif", "jpg", "jpeg", "png", "dng"].contains((fileName as NSString).pathExtension.lowercased())
@@ -105,25 +134,71 @@ struct Trip: Codable, Identifiable, Hashable {
     var folderPath: String
     var clips: [Clip] = []
     var facts: TripFacts? = nil
+    /// Every day of the trip, from day 1. nil for trips from before days existed: they have one General day.
+    var days: [TripDay]? = nil
 
     var regionLine: String {
         [state, country].filter { !$0.isEmpty }.joined(separator: ", ")
     }
 
-    func takes(of shot: ShotType) -> [Clip] {
-        clips.filter { $0.shot == shot.rawValue }.sorted { $0.take < $1.take }
+    var allDays: [TripDay] {
+        if let days, !days.isEmpty {
+            return days.sorted { $0.number < $1.number }
+        }
+        return [TripDay(number: 1, startedAt: createdAt, place: place, fileCode: fileCode, type: .general,
+                        latitude: latitude, longitude: longitude)]
     }
 
-    func takeCount(of shot: ShotType) -> Int {
-        clips.filter { $0.shot == shot.rawValue }.count
+    var lastDayNumber: Int {
+        allDays.last?.number ?? 1
+    }
+
+    func day(_ number: Int) -> TripDay {
+        let all = allDays
+        return all.first { $0.number == number } ?? all[0]
+    }
+
+    func clips(onDay number: Int) -> [Clip] {
+        clips.filter { $0.dayNumber == number }
+    }
+
+    func takeCount(of shot: ShotType, day number: Int) -> Int {
+        clips.filter { $0.shot == shot.rawValue && $0.dayNumber == number }.count
     }
 
     /// Counted row by row on the trip page, so a transition needs both its Out and In halves.
+    func targetTotal(day number: Int) -> Int {
+        let type = day(number).type
+        return TripPhase.allSlots.filter { $0.counts(for: type) }.reduce(0) { $0 + $1.target(for: type) }
+    }
+
+    func doneTotal(day number: Int) -> Int {
+        let type = day(number).type
+        return TripPhase.allSlots.filter { $0.counts(for: type) }.reduce(0) {
+            $0 + min($1.takeCount(in: self, day: number), $1.target(for: type))
+        }
+    }
+
     var targetTotal: Int {
-        TripPhase.allSlots.filter { $0.shot.countsTowardTotal }.reduce(0) { $0 + $1.target }
+        allDays.reduce(0) { $0 + targetTotal(day: $1.number) }
     }
 
     var doneTotal: Int {
-        TripPhase.allSlots.filter { $0.shot.countsTowardTotal }.reduce(0) { $0 + min($1.takeCount(in: self), $1.target) }
+        allDays.reduce(0) { $0 + doneTotal(day: $1.number) }
+    }
+
+    /// "14 November 2026", or "14–15 November 2026 · 2 days" once the trip has more than one day.
+    var dateLine: String {
+        let all = allDays
+        guard all.count > 1, let first = all.first, let last = all.last else {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .long
+            formatter.timeStyle = .none
+            return formatter.string(from: createdAt)
+        }
+        let formatter = DateIntervalFormatter()
+        formatter.dateStyle = .long
+        formatter.timeStyle = .none
+        return formatter.string(from: first.startedAt, to: last.startedAt) + " · \(all.count) days"
     }
 }
