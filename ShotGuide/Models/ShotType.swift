@@ -198,6 +198,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case wildlife = "WILDLIFE"
     /// At home or the gate, before you go and after you're back: the shots that start and end a reel.
     case home = "HOME"
+    /// A few seconds of anything that shows the place, without you: the shots that fill out every reel.
+    case bRoll = "BROLL"
     /// Dancing or lip-syncing to a song that plays in your AirPods, timed to the recording.
     case dance = "DANCE"
     /// Quick clip: straight to recording with no guidance, for moments that won't wait.
@@ -213,6 +215,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .matchCut: return "MATCH CUT"
         case .dollyZoom: return "DOLLY ZOOM"
         case .quick: return "QUICK CLIP"
+        case .bRoll: return "B-ROLL"
         default: return rawValue
         }
     }
@@ -221,6 +224,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .reveal, .wide, .walkaway, .moment, .follow, .food, .transition, .bodyWipe, .whip, .jump, .wildlife: return 2
         case .detail, .talk, .onTheWay, .sounds: return 3
+        case .bRoll: return 6
         default: return 1
         }
     }
@@ -244,7 +248,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// stays upright, for full-screen reels.
     var filming: Filming {
         switch self {
-        case .wide, .tele, .walkaway, .moment, .silhouette, .timelapse, .reflection, .matchCut, .onTheWay, .wildlife, .home:
+        case .wide, .tele, .walkaway, .moment, .silhouette, .timelapse, .reflection, .matchCut, .onTheWay, .wildlife, .home,
+             .bRoll:
             return .sideways
         case .talk, .reaction, .pov, .food, .follow, .transition, .whip, .bodyWipe, .jump:
             return .upright
@@ -281,7 +286,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return .steadyAndLevel
         case .reveal:
             return variantName == "Auto zoom" ? .steadyAndLevel : .none
-        case .detail, .food, .reflection, .sounds, .wildlife, .home:
+        case .detail, .food, .reflection, .sounds, .wildlife, .home, .bRoll:
             return .steady
         default:
             return .none
@@ -329,6 +334,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .sounds: return "Close-ups made for their sound"
         case .wildlife: return "Animals up close, on the 5x"
         case .home: return "Before you go and after you're back"
+        case .bRoll: return "5 seconds of anything that shows the place"
         case .quick: return "Straight to recording, no guidance"
         }
     }
@@ -705,6 +711,17 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 17, end: 20, text: "Hold still.")
                 ],
                 variantName: variantName)
+
+        case .bRoll:
+            return ShotPlan(
+                shot: self, take: take, group: .inHand,
+                lens: .wide, fps: 60, stabilisation: .cinematic,
+                autoStop: 5,
+                before: "Anything that shows the place: a sign, people, traffic, flags in the wind, the car park, your boots. "
+                    + "Keep the subject in the middle. It stops by itself, so grab a few in a row.",
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Hold still, or drift very slowly. Let things move in the frame.")
+                ])
 
         case .quick:
             return ShotPlan(

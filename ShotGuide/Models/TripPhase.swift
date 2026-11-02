@@ -54,13 +54,14 @@ struct ShotSlot: Identifiable, Hashable {
     }
 }
 
-/// The trip page in the order you'll film it: getting there, arriving, the first look, your time at
-/// the spot (easiest first, the ones worth taking your time over last), creative extras, and leaving.
+/// The trip page in the order you'll film it: getting there, arriving, the first look, you at the spot (easiest
+/// first, the ones worth taking your time over last), B-roll of the place to grab all day, creative extras, and leaving.
 enum TripPhase: String, CaseIterable, Identifiable {
     case onTheWay
     case arriving
     case firstLook
     case atTheSpot
+    case bRoll
     case creative
     case leaving
 
@@ -72,6 +73,7 @@ enum TripPhase: String, CaseIterable, Identifiable {
         case .arriving: return "Arriving"
         case .firstLook: return "First look"
         case .atTheSpot: return "At the spot"
+        case .bRoll: return "B-roll"
         case .creative: return "Creative"
         case .leaving: return "Leaving"
         }
@@ -86,9 +88,11 @@ enum TripPhase: String, CaseIterable, Identifiable {
         case .firstLook:
             return "Your first two minutes. Film REACTION before you've seen the view."
         case .atTheSpot:
-            return "Easiest first, down to the ones worth taking your time over. MATCH CUT is the same pose at every spot "
-                + "and SILHOUETTE needs the sun low behind you; both need the tripod. TIMELAPSE ties up the phone, "
-                + "so save it for when you sit down for a while, like waiting for sunset."
+            return "You in the view, easiest first, down to the ones worth taking your time over. MATCH CUT is the same "
+                + "pose at every spot and SILHOUETTE needs the sun low behind you; both need the tripod."
+        case .bRoll:
+            return "The place without you, to fill out any reel. Grab these whenever you've got a spare minute, all day. "
+                + "TIMELAPSE ties up the phone, so save it for when you sit down for a while, like waiting for sunset."
         case .creative:
             return "Extras for creative edits, so they don't count towards the total. CLONE needs the tripod."
         case .leaving:
@@ -114,11 +118,13 @@ enum TripPhase: String, CaseIterable, Identifiable {
         case .firstLook:
             return [ShotSlot(shot: .reaction, half: nil), ShotSlot(shot: .reveal, half: nil)]
         case .atTheSpot:
-            let shots: [ShotType] = [.ambient, .detail, .wildlife, .food, .wide, .slomo, .talk, .walkaway, .tele, .matchCut, .moment,
-                                     .silhouette, .timelapse]
+            let shots: [ShotType] = [.wide, .slomo, .talk, .walkaway, .tele, .matchCut, .moment, .silhouette]
+            return shots.map { ShotSlot(shot: $0, half: nil) }
+        case .bRoll:
+            let shots: [ShotType] = [.bRoll, .detail, .wildlife, .food, .sounds, .ambient, .timelapse]
             return shots.map { ShotSlot(shot: $0, half: nil) }
         case .creative:
-            let shots: [ShotType] = [.sounds, .reflection, .rise, .orbit, .hyperlapse, .dollyZoom, .dance, .secondAngle, .clone]
+            let shots: [ShotType] = [.reflection, .rise, .orbit, .hyperlapse, .dollyZoom, .dance, .secondAngle, .clone]
             return shots.map { ShotSlot(shot: $0, half: nil) }
         case .leaving:
             return [
