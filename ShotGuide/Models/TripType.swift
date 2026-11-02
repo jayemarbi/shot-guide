@@ -98,7 +98,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .wide: ShotTuning(summary: "The range, and how far you've climbed"),
         .walkaway: ShotTuning(summary: "You walking up the trail or along the ridge"),
         .tele: ShotTuning(summary: "You, small, on the ridge or the summit"),
-        .timelapse: ShotTuning(summary: "Clouds rolling over the peaks")
+        .timelapse: ShotTuning(summary: "Clouds rolling over the peaks"),
+        .wildlife: ShotTuning(summary: "Goats, deer, marmots, eagles")
     ]
 
     private static let fallsTuning: [ShotType: ShotTuning] = [
@@ -110,7 +111,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .wide: ShotTuning(summary: "The whole falls, top to pool"),
         .slomo: ShotTuning(target: 3, summary: "Water hitting the pool, at 120 fps"),
         .tele: ShotTuning(summary: "You, small, at the foot of the falls"),
-        .timelapse: ShotTuning(summary: "Mist and light moving through the falls")
+        .timelapse: ShotTuning(summary: "Mist and light moving through the falls"),
+        .wildlife: ShotTuning(summary: "Birds, lizards, anything at the water")
     ]
 
     private static let beachTuning: [ShotType: ShotTuning] = [
@@ -123,7 +125,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .slomo: ShotTuning(target: 2, summary: "Waves breaking, a splash, a run into the water"),
         .walkaway: ShotTuning(summary: "You walking along the waterline"),
         .tele: ShotTuning(summary: "You, small, at the water's edge"),
-        .timelapse: ShotTuning(summary: "The tide, clouds or the sun going down")
+        .timelapse: ShotTuning(summary: "The tide, clouds or the sun going down"),
+        .wildlife: ShotTuning(summary: "Birds, crabs, dolphins offshore")
     ]
 
     private static let cityTuning: [ShotType: ShotTuning] = [
@@ -157,7 +160,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .wide: ShotTuning(summary: "The snowfield and the peaks"),
         .slomo: ShotTuning(target: 2, summary: "Snow being thrown, kicked or falling"),
         .tele: ShotTuning(summary: "You, small, in the snowfield"),
-        .timelapse: ShotTuning(summary: "Clouds over the snowy peaks")
+        .timelapse: ShotTuning(summary: "Clouds over the snowy peaks"),
+        .wildlife: ShotTuning(summary: "Elk and deer in the snow")
     ]
 }
 

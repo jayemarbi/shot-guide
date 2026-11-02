@@ -47,6 +47,8 @@ final class PreviewView: UIView {
 /// volume down calls `onSecondaryButton`.
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
+    /// Which way up the phone is held, so dragging up brightens whichever way it's turned.
+    var hold: PhoneHold = .upright
     var onTap: (CGPoint, CGPoint) -> Void
     var onHold: (CGPoint, CGPoint) -> Void
     var onDrag: (CGFloat) -> Void
@@ -129,7 +131,15 @@ struct CameraPreview: UIViewRepresentable {
             guard let view else { return }
             let translation = gesture.translation(in: view)
             gesture.setTranslation(.zero, in: view)
-            parent.onDrag(translation.y)
+            // Up as you see it: up the screen when it's upright, across it when it's sideways.
+            let towardsBottom: CGFloat
+            switch parent.hold {
+            case .upright: towardsBottom = translation.y
+            case .sidewaysLeft: towardsBottom = -translation.x
+            case .sidewaysRight: towardsBottom = translation.x
+            case .upsideDown: towardsBottom = -translation.y
+            }
+            parent.onDrag(towardsBottom)
         }
 
         @objc func pinched(_ gesture: UIPinchGestureRecognizer) {

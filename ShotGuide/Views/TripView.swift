@@ -475,6 +475,10 @@ struct TripView: View {
                     Text(counts ? summary : summary + " · extra")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    if shot != .voiceover {
+                        FilmingTag(filming: shot.filming)
+                            .padding(.top, 1)
+                    }
                 }
                 Spacer()
                 Text("\(count)/\(target)")

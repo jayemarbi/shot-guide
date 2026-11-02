@@ -94,6 +94,8 @@ struct LogClipPlayer: View {
     let player: AVPlayer
     let orientation: CGImagePropertyOrientation
     let lookName: String
+    /// A wide clip, filmed with the phone sideways.
+    var wide: Bool = false
 
     @State private var playing = false
     @State private var position: Double = 0
@@ -105,7 +107,7 @@ struct LogClipPlayer: View {
     var body: some View {
         VStack(spacing: 8) {
             LookPlayer(player: player, orientation: orientation)
-                .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                .aspectRatio(wide ? 16.0 / 9.0 : 9.0 / 16.0, contentMode: .fit)
                 .frame(maxHeight: 400)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 14))

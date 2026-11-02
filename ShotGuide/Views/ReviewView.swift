@@ -31,6 +31,8 @@ struct ReviewView: View {
     @State private var confirmDelete = false
     /// Which way an Apple Log clip's frames are stored, for playing it through the look.
     @State private var logOrientation: CGImagePropertyOrientation = .right
+    /// A wide clip, filmed with the phone sideways.
+    @State private var wide = false
     @State private var copyState: CopyState = .idle
 
     enum CopyState: Equatable {
@@ -126,10 +128,10 @@ struct ReviewView: View {
                 .frame(height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         } else if let player, clip?.isLog == true {
-            LogClipPlayer(player: player, orientation: logOrientation, lookName: looks.selected.name)
+            LogClipPlayer(player: player, orientation: logOrientation, lookName: looks.selected.name, wide: wide)
         } else if let player {
             VideoPlayer(player: player)
-                .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                .aspectRatio(wide ? 16.0 / 9.0 : 9.0 / 16.0, contentMode: .fit)
                 .frame(maxHeight: 400)
                 .frame(maxWidth: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -305,7 +307,8 @@ struct ReviewView: View {
             clip.light,
             clip.lens,
             clip.fps > 0 ? "\(clip.fps) fps" : "",
-            clip.isPhoto ? "" : String(format: "%.1f s", clip.durationSeconds)
+            clip.isPhoto ? "" : String(format: "%.1f s", clip.durationSeconds),
+            clip.orientation?.lowercased() ?? ""
         ]
         let marks = (clip.marks ?? []).map { clockString($0) }
         return VStack(alignment: .leading, spacing: 4) {
@@ -388,12 +391,14 @@ struct ReviewView: View {
             if autoplay {
                 newPlayer.play()
             }
-            if clip.isLog {
-                Task {
-                    if let track = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
-                       let transform = try? await track.load(.preferredTransform) {
-                        logOrientation = MaskMaker.orientation(of: transform)
-                    }
+            // Which way the frames are stored: for the look, and whether the clip is wide or tall.
+            Task {
+                if let track = try? await AVURLAsset(url: url).loadTracks(withMediaType: .video).first,
+                   let transform = try? await track.load(.preferredTransform),
+                   let size = try? await track.load(.naturalSize) {
+                    logOrientation = MaskMaker.orientation(of: transform)
+                    let shown = size.applying(transform)
+                    wide = abs(shown.width) > abs(shown.height)
                 }
             }
         }

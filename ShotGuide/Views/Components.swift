@@ -146,3 +146,24 @@ func clockString(_ seconds: Double) -> String {
     let total = max(0, Int(seconds))
     return String(format: "%d:%02d", total / 60, total % 60)
 }
+
+extension Filming {
+    var colour: Color {
+        switch self {
+        case .sideways: return .orange
+        case .upright: return .cyan
+        case .either: return .secondary
+        }
+    }
+}
+
+/// Which way to hold the phone for a shot, under its name on the trip page.
+struct FilmingTag: View {
+    let filming: Filming
+
+    var body: some View {
+        Label(filming.title, systemImage: filming.symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(filming.colour)
+    }
+}

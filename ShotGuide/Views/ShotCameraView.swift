@@ -129,7 +129,7 @@ struct ShotCameraView: View {
             return "take \(take)"
         }
         if fixedVariant != nil, let half = plan.variantName {
-            return "\(half) half"
+            return shot.isTransition ? "\(half) half" : half.lowercased()
         }
         let target = tripType.target(for: shot)
         return take > target ? "extra take \(take)" : "take \(take) of \(target)"
@@ -199,6 +199,7 @@ struct ShotCameraView: View {
 
             CameraPreview(
                 session: camera.session,
+                hold: level.hold,
                 onTap: { viewPoint, devicePoint in
                     showFocus(at: viewPoint)
                     camera.focus(at: devicePoint, lock: false)
@@ -250,17 +251,13 @@ struct ShotCameraView: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer()
-                centreOverlay
-                Spacer()
                 bottomControls
             }
 
+            facingLayer
+
             if showBriefing && plan.isInShot && !isBusy && !permissionDenied {
                 briefingCard
-            }
-
-            if let countdownRemaining {
-                countdownView(countdownRemaining)
             }
 
             if permissionDenied {
@@ -342,8 +339,8 @@ struct ShotCameraView: View {
                     }
                     .stroke(Color.white.opacity(0.3), lineWidth: 0.5)
                 }
-                if let tilt = level.tilt, abs(tilt) < 20 {
-                    let isLevel = abs(tilt) < 1
+                if let tilt = level.tilt, let off = level.offLevel, abs(off) < 20 {
+                    let isLevel = abs(off) < 1
                     // The line stays parallel to the real horizon and turns yellow when the phone is level.
                     Capsule()
                         .fill(isLevel ? Color.yellow : Color.white.opacity(0.8))
@@ -387,6 +384,7 @@ struct ShotCameraView: View {
                     Text([camera.lensLabel, camera.formatLabel].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption)
                         .foregroundStyle(Color.white.opacity(0.8))
+                    filmingLine
                     if isTalkingShot && !micName.isEmpty {
                         Label("Mic: \(micName)", systemImage: "mic.fill")
                             .font(.caption)
@@ -464,6 +462,115 @@ struct ShotCameraView: View {
         } else if let message {
             notice(message)
         }
+    }
+
+    /// The words in the middle of the screen. They turn to face you when the phone is sideways.
+    private var facingLayer: some View {
+        GeometryReader { geometry in
+            let hold = level.hold
+            let across = hold.isSideways ? geometry.size.height : geometry.size.width
+            VStack(spacing: 14) {
+                holdBanner
+                centreOverlay
+                if hold != .upright && !isBusy && !plan.isInShot && !plan.before.isEmpty {
+                    beforeNote
+                }
+                if let countdownRemaining {
+                    countdownView(countdownRemaining)
+                }
+            }
+            .frame(width: min(across, 640))
+            .rotationEffect(.degrees(hold.screenRotation))
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            .animation(.easeInOut(duration: 0.3), value: hold)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Whether the phone is held the way this shot is filmed.
+    private var heldRight: Bool {
+        switch shot.filming {
+        case .sideways: return level.hold.isSideways
+        case .upright: return !level.hold.isSideways
+        case .either: return true
+        }
+    }
+
+    /// Shown while the phone is held the other way from how this shot is filmed.
+    @ViewBuilder
+    private var holdBanner: some View {
+        if !heldRight && camera.phase == .ready && countdownRemaining == nil && reviewClip == nil && !permissionDenied
+            && !(showBriefing && plan.isInShot) {
+            let sideways = shot.filming == .sideways
+            VStack(spacing: 10) {
+                Image(systemName: sideways ? "iphone.landscape" : "iphone")
+                    .font(.system(size: 48))
+                    .symbolEffect(.pulse)
+                Text(sideways ? "Turn the phone sideways" : "Hold the phone upright")
+                    .font(.title3.weight(.bold))
+                Text(sideways ? "This shot is for the wide, cinematic edits." : "This one is for full-screen reels.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.85))
+            }
+            .multilineTextAlignment(.center)
+            .foregroundStyle(Color.white)
+            .padding(20)
+            .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 18))
+            .padding(.horizontal, 24)
+        }
+    }
+
+    /// Which way this shot is filmed, and whether the phone is held that way, under the shot's name.
+    private var filmingLine: some View {
+        let sidewaysNow = level.hold.isSideways
+        let text: String
+        let symbol: String
+        let colour: Color
+        switch shot.filming {
+        case .sideways:
+            text = sidewaysNow ? "Sideways" : "Film sideways"
+            symbol = sidewaysNow ? "checkmark.circle.fill" : "iphone.landscape"
+            colour = sidewaysNow ? .green : .orange
+        case .upright:
+            text = sidewaysNow ? "Film upright" : "Upright"
+            symbol = sidewaysNow ? "iphone" : "checkmark.circle.fill"
+            colour = sidewaysNow ? .orange : .green
+        case .either:
+            text = sidewaysNow ? "Sideways" : "Upright"
+            symbol = sidewaysNow ? "iphone.landscape" : "iphone"
+            colour = Color.white.opacity(0.8)
+        }
+        return Label(text, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(colour)
+    }
+
+    /// The briefing's first line: which way to set the phone up.
+    @ViewBuilder
+    private var filmingNote: some View {
+        switch shot.filming {
+        case .sideways:
+            Label("Film this one sideways: set the phone up on its side.", systemImage: "iphone.landscape")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.orange)
+        case .upright:
+            Label("Film this one upright.", systemImage: "iphone")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.cyan)
+        case .either:
+            EmptyView()
+        }
+    }
+
+    /// How to film it, in the middle of the screen while the phone is turned.
+    private var beforeNote: some View {
+        Text(plan.before)
+            .font(.subheadline)
+            .multilineTextAlignment(.center)
+            .foregroundStyle(Color.white)
+            .padding(10)
+            .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 24)
     }
 
     private func notice(_ text: String) -> some View {
@@ -553,7 +660,7 @@ struct ShotCameraView: View {
                     .padding(.vertical, 6)
                     .background(Color.black.opacity(0.6), in: Capsule())
             }
-            if !isBusy && !plan.isInShot && !plan.before.isEmpty {
+            if !isBusy && !plan.isInShot && !plan.before.isEmpty && level.hold == .upright {
                 Text(plan.before)
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
@@ -692,6 +799,7 @@ struct ShotCameraView: View {
                                 .background(Color.white.opacity(0.12), in: Circle())
                         }
                     }
+                    filmingNote
                     if !shot.variants.isEmpty && fixedVariant == nil {
                         Picker("Version", selection: $variant) {
                             ForEach(shot.variants.indices, id: \.self) { index in
@@ -867,7 +975,7 @@ struct ShotCameraView: View {
     private static func still(of url: URL, at seconds: Double) async -> UIImage? {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 1080, height: 1920)
+        generator.maximumSize = CGSize(width: 1920, height: 1920)
         guard let result = try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)) else { return nil }
         return UIImage(cgImage: result.image)
     }
@@ -888,18 +996,33 @@ struct ShotCameraView: View {
         }
     }
 
+    /// The last MATCH CUT, see-through, while the phone is held the same way it was filmed: a wide one shows
+    /// once the phone is sideways, turned to sit on the picture.
     @ViewBuilder
     private var ghostOverlay: some View {
-        if let ghost, camera.phase != .recording {
-            Image(uiImage: ghost)
-                .resizable()
-                .scaledToFill()
-                .opacity(0.35)
-                .ignoresSafeArea()
+        if let ghost, camera.phase != .recording, (ghost.size.width > ghost.size.height) == level.hold.isSideways {
+            GeometryReader { geometry in
+                let size = geometry.size
+                let sideways = level.hold.isSideways
+                Image(uiImage: ghost)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: sideways ? size.height : size.width, height: sideways ? size.width : size.height)
+                    .clipped()
+                    .rotationEffect(.degrees(level.hold.screenRotation))
+                    .position(x: size.width / 2, y: size.height / 2)
+            }
+            .opacity(0.35)
+            .ignoresSafeArea()
         }
     }
 
     private var sizeBox: some View {
+        sizeBoxShape
+            .rotationEffect(.degrees(level.hold.screenRotation))
+    }
+
+    private var sizeBoxShape: some View {
         RoundedRectangle(cornerRadius: 16)
             .stroke(Color.yellow.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
             .frame(width: 230, height: 280)
@@ -1042,7 +1165,7 @@ struct ShotCameraView: View {
                 songStartAtRecording = song.heardPosition
             }
         }
-        camera.startRecording(to: url, latitude: coordinate?.latitude, longitude: coordinate?.longitude) { result in
+        camera.startRecording(to: url, hold: level.hold, latitude: coordinate?.latitude, longitude: coordinate?.longitude) { result in
             saveTake(result, plan: used, startedAt: now, latitude: coordinate?.latitude, longitude: coordinate?.longitude)
         }
     }
@@ -1118,6 +1241,9 @@ struct ShotCameraView: View {
             if used.isInShot && shot != .timelapse {
                 tags.append("me")
             }
+            if shot == .wildlife {
+                tags.append("wildlife")
+            }
             let clip = Clip(
                 fileName: result.url.lastPathComponent,
                 shot: shot.rawValue,
@@ -1150,7 +1276,8 @@ struct ShotCameraView: View {
                 colourProfile: result.log ? Clip.appleLog : Clip.normalColour,
                 whiteBalance: settings?.whiteBalance,
                 iso: settings?.iso,
-                shutter: settings?.shutter)
+                shutter: settings?.shutter,
+                orientation: result.sideways ? Clip.sideways : Clip.upright)
             store.addClip(clip, to: tripID)
             if prefill != nil {
                 // Named after the spot you're still at, so the file gets the name straight away.
@@ -1241,7 +1368,9 @@ struct ShotCameraView: View {
             // One half of a transition: done once that half has a take.
             let half = ShotSlot(shot: shot, half: fixedVariant)
             if half.takeCount(in: trip, day: day) >= 1, let name = half.variantName {
-                message = "\(name) half done. Film another, or tap ✕ to pick the next shot."
+                message = shot.isTransition
+                    ? "\(name) half done. Film another, or tap ✕ to pick the next shot."
+                    : "Done. Film another, or tap ✕ to pick the next shot."
             }
             return
         }

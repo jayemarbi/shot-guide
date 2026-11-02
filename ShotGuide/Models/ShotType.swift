@@ -13,6 +13,32 @@ enum LensChoice: String, Codable, CaseIterable {
     case front
 }
 
+/// Which way to hold the phone for a shot.
+enum Filming {
+    /// The place is the star: filmed wide, for the letterboxed, cinematic edits.
+    case sideways
+    /// You talking or up close: filmed tall, for full-screen reels.
+    case upright
+    /// Whichever suits.
+    case either
+
+    var title: String {
+        switch self {
+        case .sideways: return "Sideways"
+        case .upright: return "Upright"
+        case .either: return "Either way"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .sideways: return "iphone.landscape"
+        case .upright: return "iphone"
+        case .either: return "rotate.right"
+        }
+    }
+}
+
 enum Stabilisation: String, Codable {
     case off
     case standard
@@ -168,6 +194,10 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case silhouette = "SILHOUETTE"
     case reflection = "REFLECTION"
     case sounds = "SOUNDS"
+    /// Animals up close, on the 5x.
+    case wildlife = "WILDLIFE"
+    /// At home or the gate, before you go and after you're back: the shots that start and end a reel.
+    case home = "HOME"
     /// Dancing or lip-syncing to a song that plays in your AirPods, timed to the recording.
     case dance = "DANCE"
     /// Quick clip: straight to recording with no guidance, for moments that won't wait.
@@ -189,7 +219,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
 
     var targetTakes: Int {
         switch self {
-        case .reveal, .wide, .walkaway, .moment, .follow, .food, .transition, .bodyWipe, .whip, .jump: return 2
+        case .reveal, .wide, .walkaway, .moment, .follow, .food, .transition, .bodyWipe, .whip, .jump, .wildlife: return 2
         case .detail, .talk, .onTheWay, .sounds: return 3
         default: return 1
         }
@@ -198,20 +228,34 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// Transitions come in two halves: Out ends a place, In starts the next.
     var isTransition: Bool { self == .transition || self == .bodyWipe || self == .whip || self == .jump }
 
-    /// Extras depend on the day (a partner to follow, food, an interesting trip there), so they
-    /// don't count towards a trip's total. So do the creative shots and quick clips.
+    /// Extras depend on the day (a partner to follow, food, animals, an interesting trip there), so they
+    /// don't count towards a trip's total. Nor do the transitions, the creative shots, SECOND ANGLE and quick
+    /// clips. MATCH CUT and SILHOUETTE count: the saved reels use them a lot.
     var countsTowardTotal: Bool {
         switch self {
-        case .bodyWipe, .whip, .follow, .food, .onTheWay, .voiceover: return false
-        case .matchCut, .clone, .jump, .rise, .orbit, .dollyZoom, .hyperlapse, .silhouette, .reflection, .sounds, .dance, .quick:
+        case .bodyWipe, .whip, .transition, .follow, .food, .onTheWay, .voiceover, .wildlife, .home, .secondAngle: return false
+        case .clone, .jump, .rise, .orbit, .dollyZoom, .hyperlapse, .reflection, .sounds, .dance, .quick:
             return false
         default: return true
         }
     }
 
+    /// Which way to hold the phone. The big views go sideways, for the cinematic edits; you talking or up close
+    /// stays upright, for full-screen reels.
+    var filming: Filming {
+        switch self {
+        case .wide, .tele, .walkaway, .moment, .silhouette, .timelapse, .reflection, .matchCut, .onTheWay, .wildlife, .home:
+            return .sideways
+        case .talk, .reaction, .pov, .food, .follow, .transition, .whip, .bodyWipe, .jump:
+            return .upright
+        default:
+            return .either
+        }
+    }
+
     var defaultGroup: ShotGroup {
         switch self {
-        case .reaction, .timelapse, .walkaway, .tele, .moment, .talk, .secondAngle, .bodyWipe: return .inShot
+        case .reaction, .timelapse, .walkaway, .tele, .moment, .talk, .secondAngle, .bodyWipe, .home: return .inShot
         case .matchCut, .clone, .jump, .silhouette, .dance: return .inShot
         default: return .inHand
         }
@@ -224,6 +268,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .reveal: return ["Auto zoom", "Walk reveal"]
         case .transition, .bodyWipe, .whip, .jump: return ["Out", "In"]
+        case .home: return ["Before", "After"]
         default: return []
         }
     }
@@ -236,7 +281,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return .steadyAndLevel
         case .reveal:
             return variantName == "Auto zoom" ? .steadyAndLevel : .none
-        case .detail, .food, .reflection, .sounds:
+        case .detail, .food, .reflection, .sounds, .wildlife, .home:
             return .steady
         default:
             return .none
@@ -282,6 +327,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .silhouette: return "The two of you against the sunset"
         case .reflection: return "The scene doubled in still water"
         case .sounds: return "Close-ups made for their sound"
+        case .wildlife: return "Animals up close, on the 5x"
+        case .home: return "Before you go and after you're back"
         case .quick: return "Straight to recording, no guidance"
         }
     }
@@ -626,6 +673,39 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 25, end: nil, text: "One tip for anyone going. Stop when you're done.")
                 ])
 
+        case .wildlife:
+            return ShotPlan(
+                shot: self, take: take, group: .inHand,
+                lens: .tele, fps: 60, stabilisation: .cinematic,
+                autoStop: nil, manualLength: 20,
+                before: "Stay well back and let the 5x get you close. Brace your elbows on a rock, a rail or your knees, "
+                    + "or use the tripod.",
+                steps: [
+                    GuideStep(start: 0, end: 3, text: "Frame it with room on the side it's facing."),
+                    GuideStep(start: 3, end: 15, text: "Hold steady. Wait for it to look up, chew or move."),
+                    GuideStep(start: 15, end: nil, text: "Keep rolling while it's doing something. Stop when it's done.")
+                ])
+
+        case .home:
+            let leaving = variantIndex == 0
+            return ShotPlan(
+                shot: self, take: take, group: .inShot,
+                lens: .wide, fps: 30, stabilisation: .off,
+                autoStop: 20, countdown: 5,
+                before: leaving
+                    ? "Before you go. Prop the phone on a shelf, a bench or the tripod. Ideas: zipping up your bag, "
+                        + "a last look out the window, waiting at the gate."
+                    : "After you're back. Prop the phone on the bedside table or the tripod. Lie in bed at night, "
+                        + "lit only by your phone, scrolling through the trip.",
+                steps: [
+                    GuideStep(start: 0, end: 3, text: "Get settled. Don't look at the lens."),
+                    GuideStep(start: 3, end: 17, text: leaving
+                              ? "Get ready to go: pack, look out, wait."
+                              : "Scroll, smile at the screen, stare at the ceiling."),
+                    GuideStep(start: 17, end: 20, text: "Hold still.")
+                ],
+                variantName: variantName)
+
         case .quick:
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
@@ -762,8 +842,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 shot: self, take: take, group: .inHand,
                 lens: .ultraWide, fps: 30, stabilisation: .standard,
                 autoStop: 12,
-                before: "Turn the phone upside down so the lens is at the bottom, 1 to 2 cm above still water. "
-                    + "Don't let it touch. It gets flipped the right way up in the edit.",
+                before: "Turn the phone sideways so the camera is in a bottom corner, 1 to 2 cm above still water. "
+                    + "Don't let it touch.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Frame half reflection, half scene."),
                     GuideStep(start: 2, end: 10, text: "Hold still. Someone walking through looks great."),

@@ -20,6 +20,8 @@ struct RecordingResult {
     let elapsed: Double
     /// Recorded in Apple Log (false: the phone's normal colour, where Log isn't available).
     let log: Bool
+    /// A wide clip, filmed with the phone sideways.
+    let sideways: Bool
 }
 
 /// The white balance a take was locked to: the camera's gains, and the same as a temperature and tint.
@@ -90,6 +92,7 @@ final class CameraController: NSObject, ObservableObject {
     private var activeFPS = 30
     private var activeLog = false
     private var activeResolution = ""
+    private var activeSideways = false
     private var startTime: CFTimeInterval = 0
     private var ticker: Timer?
     private var finishHandler: ((RecordingResult?) -> Void)?
@@ -572,16 +575,25 @@ final class CameraController: NSObject, ObservableObject {
 
     // MARK: Recording
 
-    func startRecording(to url: URL, latitude: Double?, longitude: Double?, onFinish: @escaping (RecordingResult?) -> Void) {
+    /// Records the way the phone is held, like the Camera app: turn it sideways and the clip comes out wide and
+    /// the right way up. The front camera always records upright.
+    func startRecording(to url: URL, hold: PhoneHold, latitude: Double?, longitude: Double?,
+                        onFinish: @escaping (RecordingResult?) -> Void) {
         guard phase == .ready else { return }
         finishHandler = onFinish
         elapsed = 0
         phase = .recording
         let interval = mainConfig?.timelapseInterval
+        let used: PhoneHold = mainConfig?.lens == .front ? .upright : hold
+        activeSideways = used.isSideways
         sessionQueue.async {
             if let interval {
-                self.startLapse(to: url, interval: interval, latitude: latitude, longitude: longitude)
+                self.startLapse(to: url, interval: interval, hold: used, latitude: latitude, longitude: longitude)
             } else {
+                if let connection = self.movieOutput.connection(with: .video),
+                   connection.isVideoRotationAngleSupported(used.recordingAngle) {
+                    connection.videoRotationAngle = used.recordingAngle
+                }
                 self.movieOutput.metadata = Self.locationMetadata(latitude: latitude, longitude: longitude)
                 self.movieOutput.startRecording(to: url, recordingDelegate: self)
             }
@@ -627,7 +639,8 @@ final class CameraController: NSObject, ObservableObject {
         ticker?.invalidate()
         ticker = nil
         let result = url.map {
-            RecordingResult(url: $0, fps: activeFPS, resolution: activeResolution, lensLabel: lensLabel, elapsed: elapsed, log: activeLog)
+            RecordingResult(url: $0, fps: activeFPS, resolution: activeResolution, lensLabel: lensLabel, elapsed: elapsed,
+                            log: activeLog, sideways: activeSideways)
         }
         phase = .ready
         let handler = finishHandler
@@ -657,7 +670,7 @@ final class CameraController: NSObject, ObservableObject {
 
     // MARK: Time-lapse
 
-    private func startLapse(to url: URL, interval: Double, latitude: Double?, longitude: Double?) {
+    private func startLapse(to url: URL, interval: Double, hold: PhoneHold, latitude: Double?, longitude: Double?) {
         do {
             let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
             var settings = dataOutput.recommendedVideoSettings(forVideoCodecType: .hevc, assetWriterOutputFileType: .mov) ?? [:]
@@ -671,8 +684,9 @@ final class CameraController: NSObject, ObservableObject {
             }
             let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
             input.expectsMediaDataInRealTime = true
-            // Frames arrive sideways; this turns the finished video upright.
-            input.transform = CGAffineTransform(rotationAngle: .pi / 2)
+            // Frames arrive as the camera sees them, wide with the top of the phone to the left. This turns the
+            // finished video the way the phone was held.
+            input.transform = CGAffineTransform(rotationAngle: hold.recordingAngle * .pi / 180)
             let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
             guard writer.canAdd(input) else { throw CameraError.cannotAdd }
             writer.add(input)

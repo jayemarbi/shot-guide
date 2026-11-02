@@ -41,6 +41,8 @@ struct ShotSlot: Identifiable, Hashable {
         case (.whip, 1?): return "Whip in and land on the view to start here"
         case (.jump, 0?): return "Jump up out of frame to end this place"
         case (.jump, 1?): return "The same jump here, so you land in this place"
+        case (.home, 0?): return "Packing, a last look out the window, the gate"
+        case (.home, 1?): return "In bed at night, lit by your phone, back home"
         default: return shot.summary
         }
     }
@@ -78,27 +80,28 @@ enum TripPhase: String, CaseIterable, Identifiable {
     var footer: String {
         switch self {
         case .onTheWay:
-            return "The trip there."
+            return "Before you go, and the trip there. HOME · BEFORE and HOME · AFTER (under Leaving) start and end a reel."
         case .arriving:
             return "As you get there. The In halves start this place in an edit."
         case .firstLook:
             return "Your first two minutes. Film REACTION before you've seen the view."
         case .atTheSpot:
-            return "Easiest first, down to the ones worth taking your time over. TIMELAPSE ties up the phone, "
+            return "Easiest first, down to the ones worth taking your time over. MATCH CUT is the same pose at every spot "
+                + "and SILHOUETTE needs the sun low behind you; both need the tripod. TIMELAPSE ties up the phone, "
                 + "so save it for when you sit down for a while, like waiting for sunset."
         case .creative:
-            return "Extras for creative edits, so they don't count towards the total. MATCH CUT, SILHOUETTE and CLONE "
-                + "need the tripod, and SILHOUETTE needs the sun low behind you."
+            return "Extras for creative edits, so they don't count towards the total. CLONE needs the tripod."
         case .leaving:
             return "As you go. The Out halves end this place in an edit, and VOICEOVER is best somewhere quiet, like the car. "
-                + "Shots marked extra are for when the day allows, so they don't count towards the total."
+                + "HOME · AFTER is for once you're home. Shots marked extra are for when the day allows, so they don't "
+                + "count towards the total."
         }
     }
 
     var slots: [ShotSlot] {
         switch self {
         case .onTheWay:
-            return [ShotSlot(shot: .onTheWay, half: nil)]
+            return [ShotSlot(shot: .home, half: 0), ShotSlot(shot: .onTheWay, half: nil)]
         case .arriving:
             return [
                 ShotSlot(shot: .transition, half: 1),
@@ -111,10 +114,11 @@ enum TripPhase: String, CaseIterable, Identifiable {
         case .firstLook:
             return [ShotSlot(shot: .reaction, half: nil), ShotSlot(shot: .reveal, half: nil)]
         case .atTheSpot:
-            let shots: [ShotType] = [.ambient, .detail, .food, .wide, .slomo, .talk, .walkaway, .tele, .secondAngle, .moment, .timelapse]
+            let shots: [ShotType] = [.ambient, .detail, .wildlife, .food, .wide, .slomo, .talk, .walkaway, .tele, .matchCut, .moment,
+                                     .silhouette, .timelapse]
             return shots.map { ShotSlot(shot: $0, half: nil) }
         case .creative:
-            let shots: [ShotType] = [.sounds, .reflection, .rise, .orbit, .hyperlapse, .dollyZoom, .dance, .matchCut, .silhouette, .clone]
+            let shots: [ShotType] = [.sounds, .reflection, .rise, .orbit, .hyperlapse, .dollyZoom, .dance, .secondAngle, .clone]
             return shots.map { ShotSlot(shot: $0, half: nil) }
         case .leaving:
             return [
@@ -122,7 +126,8 @@ enum TripPhase: String, CaseIterable, Identifiable {
                 ShotSlot(shot: .whip, half: 0),
                 ShotSlot(shot: .bodyWipe, half: 0),
                 ShotSlot(shot: .jump, half: 0),
-                ShotSlot(shot: .voiceover, half: nil)
+                ShotSlot(shot: .voiceover, half: nil),
+                ShotSlot(shot: .home, half: 1)
             ]
         }
     }
