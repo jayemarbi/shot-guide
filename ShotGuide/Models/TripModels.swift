@@ -53,14 +53,26 @@ struct Clip: Codable, Identifiable, Hashable {
     var whiteBalance: WhiteBalance? = nil
     var iso: Int? = nil
     var shutter: Double? = nil
-    /// "Sideways" (a wide clip) or "Upright" (a tall one), from how the phone was held as recording started.
-    /// nil for clips from before 1.10 and ones added from Photos.
+    /// "Landscape" (a wide clip) or "Portrait" (a tall one), from how the phone was held as recording started.
+    /// nil for clips from before 1.10 and ones added from Photos. 1.10 to 1.12 said "Sideways" and "Upright".
     var orientation: String? = nil
 
     static let appleLog = "Apple Log"
     static let normalColour = "Normal"
-    static let sideways = "Sideways"
-    static let upright = "Upright"
+    static let landscape = "Landscape"
+    static let portrait = "Portrait"
+
+    /// "landscape" or "portrait", for the catalogue and the review screen.
+    var orientationLabel: String? {
+        guard let orientation else { return nil }
+        if orientation == Clip.landscape || orientation == "Sideways" {
+            return "landscape"
+        }
+        if orientation == Clip.portrait || orientation == "Upright" {
+            return "portrait"
+        }
+        return nil
+    }
 
     var shotType: ShotType? { ShotType(rawValue: shot) }
 

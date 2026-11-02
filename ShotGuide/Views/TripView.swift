@@ -476,7 +476,7 @@ struct TripView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                     if shot != .voiceover {
-                        FilmingTag(filming: shot.filming)
+                        FilmingTag(filming: shot.filming, mount: shot.mountSummary)
                             .padding(.top, 1)
                     }
                 }

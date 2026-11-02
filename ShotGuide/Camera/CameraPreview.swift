@@ -7,8 +7,9 @@ final class PreviewView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
     /// The picture through the look (Apple Log made to look normal, plus the highlight stripes), drawn over
-    /// the plain preview. The plain one still sits underneath for working out where taps land.
-    let lookLayer = LookRenderer.makeLayer()
+    /// the plain preview. The plain one still sits underneath for working out where taps land, and shows
+    /// until the first frame through the look arrives.
+    let lookLayer = LookRenderer.makeLayer(filling: true)
 
     var previewLayer: AVCaptureVideoPreviewLayer {
         // layerClass guarantees this cast.
@@ -35,9 +36,7 @@ final class PreviewView: UIView {
         lookLayer.frame = bounds
         CATransaction.commit()
         let scale = window?.screen.scale ?? UIScreen.main.scale
-        lookLayer.contentsScale = scale
         let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
-        lookLayer.drawableSize = size
         LookRenderer.shared.attachPreview(lookLayer, pixelSize: size)
     }
 }

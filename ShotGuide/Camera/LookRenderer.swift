@@ -8,38 +8,35 @@ import UIKit
 /// Shows Apple Log pictures through the look: the live camera (with stripes where highlights are close to
 /// blowing out) and clips played back on the review screen. Nothing here changes what's recorded.
 /// Colour management is off throughout, so the camera's raw Log values go straight into the look.
+/// Each picture is drawn into a pixel buffer, top row first like any video frame, and shown by a video layer,
+/// so it comes out the right way up on every phone.
 final class LookRenderer {
     static let shared = LookRenderer()
 
-    let device: MTLDevice?
     let context: CIContext
-    private let queue: MTLCommandQueue?
     private let lock = NSLock()
     private var cube: CubeLUT?
-    private weak var previewLayer: CAMetalLayer?
+    private weak var previewRenderer: AVSampleBufferVideoRenderer?
     private var previewSize: CGSize = .zero
     private var lastPreview: CFTimeInterval = 0
-    /// Set once by a tiny test render: whether Core Image draws into Metal textures upside down.
-    private var flipsTextures = false
+    /// Buffers for the live camera, only used on the camera's frame queue.
+    private let previewFrames = FramePool()
 
     /// Highlight warning levels, as raw values: Log footage is close to clipping well before 1.
     static let logZebraLevel: Float = 0.87
     static let normalZebraLevel: Float = 0.97
 
     private init() {
-        device = MTLCreateSystemDefaultDevice()
-        queue = device?.makeCommandQueue()
         let options: [CIContextOption: Any] = [
             .workingColorSpace: NSNull(),
             .outputColorSpace: NSNull(),
             .cacheIntermediates: false
         ]
-        if let device {
+        if let device = MTLCreateSystemDefaultDevice() {
             context = CIContext(mtlDevice: device, options: options)
         } else {
             context = CIContext(options: options)
         }
-        flipsTextures = measureFlip()
     }
 
     func setCube(_ cube: CubeLUT?) {
@@ -54,92 +51,76 @@ final class LookRenderer {
         return cube
     }
 
-    static func makeLayer() -> CAMetalLayer {
-        let layer = CAMetalLayer()
-        layer.device = shared.device
-        layer.pixelFormat = .bgra8Unorm
-        layer.framebufferOnly = false
-        layer.isOpaque = false
-        layer.contentsGravity = .resizeAspectFill
+    /// A layer that shows the pictures. `filling` crops to fill it, like the camera; otherwise the whole picture fits inside.
+    static func makeLayer(filling: Bool) -> AVSampleBufferDisplayLayer {
+        let layer = AVSampleBufferDisplayLayer()
+        layer.videoGravity = filling ? .resizeAspectFill : .resizeAspect
         return layer
     }
 
-    /// The camera screen's layer, and its size in pixels. Called when it's laid out.
-    func attachPreview(_ layer: CAMetalLayer, pixelSize: CGSize) {
+    /// The camera screen's layer, and its size in pixels. Called on the main thread when it's laid out.
+    func attachPreview(_ layer: AVSampleBufferDisplayLayer, pixelSize: CGSize) {
+        let renderer = layer.sampleBufferRenderer
         lock.lock()
-        previewLayer = layer
+        previewRenderer = renderer
         previewSize = pixelSize
         lock.unlock()
     }
 
     // MARK: Live camera
 
-    /// One camera frame, on the camera's frame queue. Drawn at up to 30 a second.
-    func renderPreview(_ pixelBuffer: CVPixelBuffer, front: Bool, log: Bool) {
+    /// One camera frame, on the camera's frame queue, turned by `orientation` to show the right way up.
+    /// Drawn at up to 30 a second.
+    func renderPreview(_ pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, log: Bool) {
         let now = CACurrentMediaTime()
         lock.lock()
-        let layer = previewLayer
+        let renderer = previewRenderer
         let size = previewSize
         let cube = log ? self.cube : nil
         let tooSoon = now - lastPreview < 1.0 / 31.0
         if !tooSoon { lastPreview = now }
         lock.unlock()
-        guard !tooSoon, let layer, size.width > 1, size.height > 1 else { return }
+        guard !tooSoon, let renderer, size.width > 1, size.height > 1 else { return }
         var image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()])
         guard !image.extent.isEmpty else { return }
-        image = Self.fill(image.oriented(front ? .leftMirrored : .right), into: size)
+        image = Self.fill(image.oriented(orientation), into: size)
         let shown = cube?.apply(to: image) ?? image
         let output = Self.zebras(on: shown, raw: image, level: log ? Self.logZebraLevel : Self.normalZebraLevel, size: size)
-        draw(output, into: layer, size: size)
+        show(output, size: size, frames: previewFrames, on: renderer)
     }
 
     // MARK: Playback
 
-    /// One frame of a clip being played back, drawn to fit inside the layer.
-    func renderClipFrame(_ pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, into layer: CAMetalLayer, size: CGSize) {
-        guard size.width > 1, size.height > 1 else { return }
+    /// One frame of a clip being played back, made small enough to fit inside `bounds` (in pixels); the layer
+    /// fits it to the screen.
+    func renderClipFrame(_ pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation, within bounds: CGSize,
+                         frames: FramePool, on renderer: AVSampleBufferVideoRenderer) {
+        guard bounds.width > 1, bounds.height > 1 else { return }
         var image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()])
         guard !image.extent.isEmpty else { return }
-        image = Self.fit(image.oriented(orientation), into: size)
+        image = image.oriented(orientation)
+        let extent = image.extent
+        let scale = min(1, bounds.width / extent.width, bounds.height / extent.height)
+        let size = CGSize(width: max(2, (extent.width * scale / 2).rounded() * 2),
+                          height: max(2, (extent.height * scale / 2).rounded() * 2))
+        image = Self.fill(image, into: size)
         let shown = currentCube?.apply(to: image) ?? image
-        let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: CGRect(origin: .zero, size: size))
-        draw(shown.composited(over: black), into: layer, size: size)
+        show(shown, size: size, frames: frames, on: renderer)
     }
 
     // MARK: Drawing
 
-    private func draw(_ image: CIImage, into layer: CAMetalLayer, size: CGSize) {
-        guard let queue, let drawable = layer.nextDrawable(), let buffer = queue.makeCommandBuffer() else { return }
-        var output = image
-        if flipsTextures {
-            output = output.transformed(by: CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -size.height))
+    /// Draws the picture into a fresh buffer and puts it on screen straight away.
+    private func show(_ image: CIImage, size: CGSize, frames: FramePool, on renderer: AVSampleBufferVideoRenderer) {
+        // The layer stops after the app has been in the background; clearing it starts it again.
+        if renderer.status == .failed {
+            renderer.flush()
         }
-        let bounds = CGRect(origin: .zero, size: size)
-        context.render(output, to: drawable.texture, commandBuffer: buffer, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
-        buffer.present(drawable)
-        buffer.commit()
-    }
-
-    /// Draws a 2x2 picture, red on top, into a texture and reads it back, to learn which way up
-    /// Core Image draws into Metal textures on this phone.
-    private func measureFlip() -> Bool {
-        guard let device, let queue else { return false }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 2, height: 2, mipmapped: false)
-        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
-        descriptor.storageMode = .shared
-        guard let texture = device.makeTexture(descriptor: descriptor), let buffer = queue.makeCommandBuffer() else { return false }
-        let red = CIImage(color: CIColor(red: 1, green: 0, blue: 0)).cropped(to: CGRect(x: 0, y: 1, width: 2, height: 1))
-        let blue = CIImage(color: CIColor(red: 0, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 2, height: 1))
-        context.render(red.composited(over: blue), to: texture, commandBuffer: buffer,
-                       bounds: CGRect(x: 0, y: 0, width: 2, height: 2), colorSpace: CGColorSpaceCreateDeviceRGB())
-        buffer.commit()
-        buffer.waitUntilCompleted()
-        var pixels = [UInt8](repeating: 0, count: 16)
-        texture.getBytes(&pixels, bytesPerRow: 8, from: MTLRegionMake2D(0, 0, 2, 2), mipmapLevel: 0)
-        // BGRA: the first pixel is the texture's top-left. Red there means the picture came out upright.
-        let topIsRed = pixels[2] > 128 && pixels[0] < 128
-        let topIsBlue = pixels[0] > 128 && pixels[2] < 128
-        return topIsBlue && !topIsRed
+        guard renderer.isReadyForMoreMediaData,
+              let buffer = frames.buffer(width: Int(size.width), height: Int(size.height)) else { return }
+        context.render(image, to: buffer, bounds: CGRect(origin: .zero, size: size), colorSpace: nil)
+        guard let sample = frames.sample(for: buffer) else { return }
+        renderer.enqueue(sample)
     }
 
     // MARK: Fitting and the highlight warning
@@ -193,10 +174,81 @@ final class LookRenderer {
     }
 }
 
+/// A few reusable picture buffers of one size, and the wrapping a video layer needs to show one at once.
+/// Each pool is only used from one queue.
+final class FramePool {
+    private var pool: CVPixelBufferPool?
+    private var width = 0
+    private var height = 0
+    private var format: CMVideoFormatDescription?
+
+    func buffer(width: Int, height: Int) -> CVPixelBuffer? {
+        guard width > 0, height > 0 else { return nil }
+        if pool == nil || width != self.width || height != self.height {
+            let attributes: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+                kCVPixelBufferMetalCompatibilityKey as String: true
+            ]
+            let poolAttributes: [String: Any] = [kCVPixelBufferPoolMinimumBufferCountKey as String: 3]
+            var created: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttributes as CFDictionary, attributes as CFDictionary, &created)
+            pool = created
+            self.width = width
+            self.height = height
+            format = nil
+        }
+        guard let pool else { return nil }
+        // No more than 6 at once, so frames can't pile up if the screen falls behind.
+        let limit: [String: Any] = [kCVPixelBufferPoolAllocationThresholdKey as String: 6]
+        var made: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(kCFAllocatorDefault, pool, limit as CFDictionary, &made)
+                == kCVReturnSuccess,
+              let made else { return nil }
+        // The looks are made for phone screens.
+        CVBufferSetAttachment(made, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(made, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB, .shouldPropagate)
+        return made
+    }
+
+    /// Wraps a drawn buffer so the layer shows it as soon as it gets it.
+    func sample(for buffer: CVPixelBuffer) -> CMSampleBuffer? {
+        if let current = format, CMVideoFormatDescriptionMatchesImageBuffer(current, imageBuffer: buffer) {
+            // Same size and colour as the last one.
+        } else {
+            var created: CMVideoFormatDescription?
+            CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: buffer,
+                                                         formatDescriptionOut: &created)
+            format = created
+        }
+        guard let format else { return nil }
+        var timing = CMSampleTimingInfo(duration: .invalid,
+                                        presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
+                                        decodeTimeStamp: .invalid)
+        var wrapped: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: buffer,
+                                                       formatDescription: format, sampleTiming: &timing,
+                                                       sampleBufferOut: &wrapped) == noErr,
+              let wrapped else { return nil }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(wrapped, createIfNecessary: true),
+           CFArrayGetCount(attachments) > 0 {
+            let first = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(first,
+                                 Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        return wrapped
+    }
+}
+
 /// Plays a clip on the review screen through the look. Frames come from the player without any colour
 /// conversion, so Apple Log clips look the way they did while filming.
 final class LookPlayerUIView: UIView {
-    let metalLayer = LookRenderer.makeLayer()
+    let pictureLayer = LookRenderer.makeLayer(filling: false)
+    private let frames = FramePool()
+    private var pixelSize: CGSize = .zero
     private var output: AVPlayerItemVideoOutput?
     private var link: CADisplayLink?
     private weak var item: AVPlayerItem?
@@ -205,7 +257,7 @@ final class LookPlayerUIView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
-        layer.addSublayer(metalLayer)
+        layer.addSublayer(pictureLayer)
     }
 
     required init?(coder: NSCoder) {
@@ -214,10 +266,12 @@ final class LookPlayerUIView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        metalLayer.frame = bounds
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        pictureLayer.frame = bounds
+        CATransaction.commit()
         let scale = window?.screen.scale ?? UIScreen.main.scale
-        metalLayer.contentsScale = scale
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        pixelSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
 
     func attach(_ player: AVPlayer) {
@@ -253,7 +307,8 @@ final class LookPlayerUIView: UIView {
         let time = output.itemTime(forHostTime: CACurrentMediaTime())
         guard output.hasNewPixelBuffer(forItemTime: time),
               let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else { return }
-        LookRenderer.shared.renderClipFrame(buffer, orientation: orientation, into: metalLayer, size: metalLayer.drawableSize)
+        LookRenderer.shared.renderClipFrame(buffer, orientation: orientation, within: pixelSize, frames: frames,
+                                            on: pictureLayer.sampleBufferRenderer)
     }
 }
 

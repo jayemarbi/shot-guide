@@ -672,7 +672,7 @@ final class TripStore: ObservableObject {
             clip.whiteBalance.map { String($0.tint) } ?? "",
             clip.iso.map { String($0) } ?? "",
             clip.shutterText ?? "",
-            clip.orientation?.lowercased() ?? ""
+            clip.orientationLabel ?? ""
         ]
         return first + added + colour
     }

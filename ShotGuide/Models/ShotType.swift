@@ -16,25 +16,59 @@ enum LensChoice: String, Codable, CaseIterable {
 /// Which way to hold the phone for a shot.
 enum Filming {
     /// The place is the star: filmed wide, for the letterboxed, cinematic edits.
-    case sideways
+    case landscape
     /// You talking or up close: filmed tall, for full-screen reels.
-    case upright
+    case portrait
     /// Whichever suits.
     case either
 
     var title: String {
         switch self {
-        case .sideways: return "Sideways"
-        case .upright: return "Upright"
+        case .landscape: return "Landscape"
+        case .portrait: return "Portrait"
         case .either: return "Either way"
+        }
+    }
+
+    /// For the How it works card: "Landscape, on the tripod."
+    var cardTitle: String {
+        switch self {
+        case .landscape: return "Landscape"
+        case .portrait: return "Portrait"
+        case .either: return "Portrait or landscape"
         }
     }
 
     var symbol: String {
         switch self {
-        case .sideways: return "iphone.landscape"
-        case .upright: return "iphone"
+        case .landscape: return "iphone.landscape"
+        case .portrait: return "iphone"
         case .either: return "rotate.right"
+        }
+    }
+}
+
+/// What the phone is on for a shot.
+enum Mount: Equatable {
+    case tripod
+    /// For smooth moving shots.
+    case gimbal
+    case handheld
+
+    var title: String {
+        switch self {
+        case .tripod: return "Tripod"
+        case .gimbal: return "Gimbal"
+        case .handheld: return "Handheld"
+        }
+    }
+
+    /// "Landscape, on the tripod."
+    var phrase: String {
+        switch self {
+        case .tripod: return "on the tripod"
+        case .gimbal: return "on the gimbal"
+        case .handheld: return "handheld"
         }
     }
 }
@@ -142,6 +176,8 @@ struct ShotPlan {
     var exposureBias: Float = 0
     /// Where you are in the frame, for the shots you're in. Shown under Setup on the How it works card.
     var placement: String? = nil
+    /// What the phone is on: the tripod, the gimbal or your hand.
+    var mount: Mount = .handheld
 
     var isInShot: Bool { group == .inShot }
 
@@ -260,9 +296,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .wide, .tele, .walkaway, .moment, .silhouette, .timelapse, .reflection, .matchCut, .onTheWay, .wildlife, .home,
              .bRoll:
-            return .sideways
+            return .landscape
         case .talk, .reaction, .pov, .food, .follow, .transition, .whip, .bodyWipe, .jump:
-            return .upright
+            return .portrait
         default:
             return .either
         }
@@ -352,7 +388,44 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     func plan(take: Int, inShot: Bool, variant: Int) -> ShotPlan {
         var plan = basePlan(take: take, inShot: inShot, variant: variant)
         plan.placement = placement(for: plan)
+        plan.mount = mount(for: plan)
         return plan
+    }
+
+    /// What the phone goes on: the tripod for still shots, the gimbal for smooth moving ones, your hand for the rest.
+    private func mount(for plan: ShotPlan) -> Mount {
+        switch self {
+        case .reveal:
+            return plan.variantName == variants.first ? .tripod : .gimbal
+        case .wide, .slomo:
+            return plan.isInShot ? .tripod : .handheld
+        case .timelapse, .walkaway, .tele, .moment, .talk, .secondAngle, .bodyWipe, .matchCut, .clone, .jump, .silhouette,
+             .dance, .home:
+            return .tripod
+        case .follow, .pov, .rise, .orbit, .dollyZoom, .hyperlapse:
+            return .gimbal
+        default:
+            return .handheld
+        }
+    }
+
+    /// The mounts a shot can use across its versions, for the trip page: "Tripod", or "Handheld or tripod" for
+    /// WIDE, which can be filmed with you in it.
+    var mountSummary: String {
+        let inShot = defaultGroup == .inShot
+        var plans = [plan(take: 1, inShot: inShot, variant: 0)]
+        if canToggleInShot {
+            plans.append(plan(take: 1, inShot: !inShot, variant: 0))
+        }
+        for index in variants.indices.dropFirst() {
+            plans.append(plan(take: 1, inShot: inShot, variant: index))
+        }
+        var mounts: [Mount] = []
+        for candidate in plans where !mounts.contains(candidate.mount) {
+            mounts.append(candidate.mount)
+        }
+        let words = mounts.enumerated().map { $0.offset == 0 ? $0.element.title : $0.element.title.lowercased() }
+        return words.joined(separator: " or ")
     }
 
     /// Where you are in the frame, for the shots you're in.
@@ -1027,7 +1100,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 shot: self, take: take, group: .inHand,
                 lens: .ultraWide, fps: 30, stabilisation: .standard,
                 autoStop: 12,
-                before: "Turn the phone sideways so the camera is in a bottom corner, 1 to 2 cm above still water. "
+                before: "Turn the phone to landscape so the camera is in a bottom corner, 1 to 2 cm above still water. "
                     + "Don't let it touch.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Frame half reflection, half scene."),

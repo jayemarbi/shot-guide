@@ -490,8 +490,8 @@ struct ShotCameraView: View {
     /// Whether the phone is held the way this shot is filmed.
     private var heldRight: Bool {
         switch shot.filming {
-        case .sideways: return level.hold.isSideways
-        case .upright: return !level.hold.isSideways
+        case .landscape: return level.hold.isSideways
+        case .portrait: return !level.hold.isSideways
         case .either: return true
         }
     }
@@ -501,14 +501,14 @@ struct ShotCameraView: View {
     private var holdBanner: some View {
         if !heldRight && camera.phase == .ready && countdownRemaining == nil && reviewClip == nil && !permissionDenied
             && !showBriefing {
-            let sideways = shot.filming == .sideways
+            let landscape = shot.filming == .landscape
             VStack(spacing: 10) {
-                Image(systemName: sideways ? "iphone.landscape" : "iphone")
+                Image(systemName: landscape ? "iphone.landscape" : "iphone")
                     .font(.system(size: 48))
                     .symbolEffect(.pulse)
-                Text(sideways ? "Turn the phone sideways" : "Hold the phone upright")
+                Text(landscape ? "Turn the phone to landscape" : "Turn the phone to portrait")
                     .font(.title3.weight(.bold))
-                Text(sideways ? "This shot is for the wide, cinematic edits." : "This one is for full-screen reels.")
+                Text(landscape ? "This shot is for the wide, cinematic edits." : "This one is for full-screen reels.")
                     .font(.subheadline)
                     .foregroundStyle(Color.white.opacity(0.85))
             }
@@ -520,46 +520,38 @@ struct ShotCameraView: View {
         }
     }
 
-    /// Which way this shot is filmed, and whether the phone is held that way, under the shot's name.
+    /// Which way this shot is filmed and what the phone goes on, and whether it's held that way, under the
+    /// shot's name: "Landscape · Tripod".
     private var filmingLine: some View {
-        let sidewaysNow = level.hold.isSideways
+        let landscapeNow = level.hold.isSideways
         let text: String
         let symbol: String
         let colour: Color
         switch shot.filming {
-        case .sideways:
-            text = sidewaysNow ? "Sideways" : "Film sideways"
-            symbol = sidewaysNow ? "checkmark.circle.fill" : "iphone.landscape"
-            colour = sidewaysNow ? .green : .orange
-        case .upright:
-            text = sidewaysNow ? "Film upright" : "Upright"
-            symbol = sidewaysNow ? "iphone" : "checkmark.circle.fill"
-            colour = sidewaysNow ? .orange : .green
+        case .landscape:
+            text = landscapeNow ? "Landscape" : "Turn to landscape"
+            symbol = landscapeNow ? "checkmark.circle.fill" : "iphone.landscape"
+            colour = landscapeNow ? .green : .orange
+        case .portrait:
+            text = landscapeNow ? "Turn to portrait" : "Portrait"
+            symbol = landscapeNow ? "iphone" : "checkmark.circle.fill"
+            colour = landscapeNow ? .orange : .green
         case .either:
-            text = sidewaysNow ? "Sideways" : "Upright"
-            symbol = sidewaysNow ? "iphone.landscape" : "iphone"
+            text = landscapeNow ? "Landscape" : "Portrait"
+            symbol = landscapeNow ? "iphone.landscape" : "iphone"
             colour = Color.white.opacity(0.8)
         }
-        return Label(text, systemImage: symbol)
+        return Label(text + " · " + plan.mount.title, systemImage: symbol)
             .font(.caption.weight(.semibold))
             .foregroundStyle(colour)
     }
 
-    /// The briefing's first line: which way to set the phone up.
-    @ViewBuilder
+    /// The card's first setup line: which way to hold the phone and what it goes on, like "Landscape, on the tripod."
     private var filmingNote: some View {
-        switch shot.filming {
-        case .sideways:
-            Label("Film this one sideways: set the phone up on its side.", systemImage: "iphone.landscape")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.orange)
-        case .upright:
-            Label("Film this one upright.", systemImage: "iphone")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.cyan)
-        case .either:
-            EmptyView()
-        }
+        let filming = shot.filming
+        return Label("\(filming.cardTitle), \(plan.mount.phrase).", systemImage: filming.symbol)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(filming == .either ? Color.white : filming.colour)
     }
 
     /// How to film it, in the middle of the screen while the phone is turned.
@@ -1311,7 +1303,7 @@ struct ShotCameraView: View {
                 whiteBalance: settings?.whiteBalance,
                 iso: settings?.iso,
                 shutter: settings?.shutter,
-                orientation: result.sideways ? Clip.sideways : Clip.upright)
+                orientation: result.sideways ? Clip.landscape : Clip.portrait)
             store.addClip(clip, to: tripID)
             if prefill != nil {
                 // Named after the spot you're still at, so the file gets the name straight away.

@@ -150,20 +150,27 @@ func clockString(_ seconds: Double) -> String {
 extension Filming {
     var colour: Color {
         switch self {
-        case .sideways: return .orange
-        case .upright: return .cyan
+        case .landscape: return .orange
+        case .portrait: return .cyan
         case .either: return .secondary
         }
     }
 }
 
-/// Which way to hold the phone for a shot, under its name on the trip page.
+/// Which way to hold the phone for a shot, and what it goes on, under its name on the trip page:
+/// "Landscape · Tripod".
 struct FilmingTag: View {
     let filming: Filming
+    var mount: String? = nil
 
     var body: some View {
-        Label(filming.title, systemImage: filming.symbol)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(filming.colour)
+        HStack(spacing: 4) {
+            Label(filming.title, systemImage: filming.symbol)
+            if let mount {
+                Text("· " + mount)
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(filming.colour)
     }
 }

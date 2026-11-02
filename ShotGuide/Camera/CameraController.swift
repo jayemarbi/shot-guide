@@ -257,6 +257,17 @@ final class CameraController: NSObject, ObservableObject {
                 movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
             }
         }
+        // The look's frames come already turned upright for the portrait screen, and never mirrored, so how they're
+        // drawn doesn't depend on which way the sensor sits. The front camera is mirrored when it's drawn.
+        if !isLapse, let previewConnection = previewOutput.connection(with: .video) {
+            if previewConnection.isVideoRotationAngleSupported(90) {
+                previewConnection.videoRotationAngle = 90
+            }
+            if previewConnection.isVideoMirroringSupported {
+                previewConnection.automaticallyAdjustsVideoMirroring = false
+                previewConnection.isVideoMirrored = false
+            }
+        }
         session.commitConfiguration()
 
         // Frame rate, zoom, focus and exposure go on after the commit, because adding an input resets them.
@@ -919,7 +930,7 @@ extension CameraController: AVCaptureFileOutputRecordingDelegate {
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         if let frame = CMSampleBufferGetImageBuffer(sampleBuffer) {
-            LookRenderer.shared.renderPreview(frame, front: previewFront, log: previewLog)
+            LookRenderer.shared.renderPreview(frame, orientation: Self.upright(connection, front: previewFront), log: previewLog)
         }
         guard output === dataOutput, lapseActive, let input = writerInput, let adaptor else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
@@ -932,5 +943,14 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
             lapseFrames += 1
             lapseLast = time
         }
+    }
+
+    /// How to turn a frame from this connection so it shows the right way up on the portrait screen. The preview's
+    /// frames already come upright; the time-lapse's come the way the sensor sits. The front camera shows mirrored.
+    static func upright(_ connection: AVCaptureConnection, front: Bool) -> CGImagePropertyOrientation {
+        if abs(connection.videoRotationAngle - 90) < 1 {
+            return front ? .upMirrored : .up
+        }
+        return front ? .leftMirrored : .right
     }
 }

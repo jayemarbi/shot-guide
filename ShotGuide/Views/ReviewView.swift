@@ -308,7 +308,7 @@ struct ReviewView: View {
             clip.lens,
             clip.fps > 0 ? "\(clip.fps) fps" : "",
             clip.isPhoto ? "" : String(format: "%.1f s", clip.durationSeconds),
-            clip.orientation?.lowercased() ?? ""
+            clip.orientationLabel ?? ""
         ]
         let marks = (clip.marks ?? []).map { clockString($0) }
         return VStack(alignment: .leading, spacing: 4) {
