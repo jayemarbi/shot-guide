@@ -74,7 +74,7 @@ struct ShotCameraView: View {
         self.fixedVariant = fixedVariant
         self.autoStart = autoStart
         _inShot = State(initialValue: shot.defaultGroup == .inShot)
-        _showBriefing = State(initialValue: shot.defaultGroup == .inShot && !autoStart)
+        _showBriefing = State(initialValue: !autoStart && (shot.defaultGroup == .inShot || !HowItWorks.seen(shot)))
     }
 
     /// The day's trip type, which tunes the takes, the tips and, for snow, the brightness.
@@ -256,7 +256,7 @@ struct ShotCameraView: View {
 
             facingLayer
 
-            if showBriefing && plan.isInShot && !isBusy && !permissionDenied {
+            if showBriefing && !isBusy && !permissionDenied && shot != .quick {
                 briefingCard
             }
 
@@ -500,7 +500,7 @@ struct ShotCameraView: View {
     @ViewBuilder
     private var holdBanner: some View {
         if !heldRight && camera.phase == .ready && countdownRemaining == nil && reviewClip == nil && !permissionDenied
-            && !(showBriefing && plan.isInShot) {
+            && !showBriefing {
             let sideways = shot.filming == .sideways
             VStack(spacing: 10) {
                 Image(systemName: sideways ? "iphone.landscape" : "iphone")
@@ -683,13 +683,15 @@ struct ShotCameraView: View {
             }
             HStack {
                 Group {
-                    if plan.isInShot && !isBusy {
+                    if !isBusy && shot != .quick {
                         Button {
                             showBriefing = true
                         } label: {
-                            Label("Timeline", systemImage: "list.bullet")
+                            Label("How it works", systemImage: "list.bullet")
                                 .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 12)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                                .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
                                 .background(Color.black.opacity(0.5), in: Capsule())
                         }
@@ -799,7 +801,6 @@ struct ShotCameraView: View {
                                 .background(Color.white.opacity(0.12), in: Circle())
                         }
                     }
-                    filmingNote
                     if !shot.variants.isEmpty && fixedVariant == nil {
                         Picker("Version", selection: $variant) {
                             ForEach(shot.variants.indices, id: \.self) { index in
@@ -808,8 +809,16 @@ struct ShotCameraView: View {
                         }
                         .pickerStyle(.segmented)
                     }
+                    cardHeading("Setup")
+                    filmingNote
                     Text(plan.before)
                         .foregroundStyle(Color.white.opacity(0.8))
+                    if let placement = plan.placement {
+                        cardHeading("Where you are")
+                        Text(placement)
+                            .foregroundStyle(Color.white.opacity(0.8))
+                    }
+                    cardHeading("Walkthrough")
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(displaySteps, id: \.self) { step in
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -820,6 +829,23 @@ struct ShotCameraView: View {
                                 Text(step.text)
                             }
                         }
+                    }
+                    if !shot.tips.isEmpty {
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(shot.tips, id: \.self) { tip in
+                                    Label(tip, systemImage: "lightbulb")
+                                        .font(.subheadline)
+                                        .foregroundStyle(Color.white.opacity(0.85))
+                                }
+                            }
+                            .padding(.top, 6)
+                        } label: {
+                            Text("Optional tips")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Color.white)
+                        }
+                        .tint(.orange)
                     }
                     if shot.canToggleInShot {
                         Toggle("I'm in this shot", isOn: $inShot)
@@ -833,8 +859,9 @@ struct ShotCameraView: View {
                         .foregroundStyle(Color.white.opacity(0.7))
                     Button {
                         showBriefing = false
+                        HowItWorks.markSeen(shot)
                     } label: {
-                        Text("Set up the shot")
+                        Text(plan.isInShot ? "Set up the shot" : "Got it")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 6)
@@ -849,6 +876,13 @@ struct ShotCameraView: View {
                 .padding(.top, 60)
             }
         }
+    }
+
+    private func cardHeading(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color.white.opacity(0.5))
+            .padding(.top, 4)
     }
 
     private func countdownView(_ remaining: Int) -> some View {
@@ -899,7 +933,7 @@ struct ShotCameraView: View {
         take = store.nextTake(tripID: tripID, shot: shot, day: day)
         variant = variantFor(take: take)
         timing = TimingStore.load(shot, plan: plan)
-        showBriefing = plan.isInShot && !autoStart
+        showBriefing = !autoStart && (plan.isInShot || !HowItWorks.seen(shot))
         level.start()
         UIDevice.current.isBatteryMonitoringEnabled = true
         readBattery()
@@ -1053,7 +1087,7 @@ struct ShotCameraView: View {
 
     private func planChanged() {
         timing = TimingStore.load(shot, plan: plan)
-        showBriefing = plan.isInShot
+        showBriefing = !autoStart && (plan.isInShot || !HowItWorks.seen(shot))
         if cameraAllowed {
             camera.configure(plan.captureConfig)
         }
@@ -1386,6 +1420,20 @@ struct ShotCameraView: View {
         guard let time = try? await asset.load(.duration) else { return nil }
         let seconds = CMTimeGetSeconds(time)
         return seconds.isFinite && seconds > 0 ? seconds : nil
+    }
+}
+
+/// The How it works card opens by itself for shots you're in, before every take, and for the rest the first
+/// time you open them. The How it works button brings it back any time.
+enum HowItWorks {
+    private static func key(_ shot: ShotType) -> String { "howItWorks.seen." + shot.rawValue }
+
+    static func seen(_ shot: ShotType) -> Bool {
+        UserDefaults.standard.bool(forKey: key(shot))
+    }
+
+    static func markSeen(_ shot: ShotType) {
+        UserDefaults.standard.set(true, forKey: key(shot))
     }
 }
 

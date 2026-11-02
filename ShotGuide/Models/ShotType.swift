@@ -51,7 +51,15 @@ struct GuideStep: Hashable {
     let end: Double?
     let text: String
 
+    /// Rough times for the walkthrough, like "2–10 s" or, for long shots, "1–10 min".
     var rangeLabel: String {
+        let whole = { (value: Double) in value.truncatingRemainder(dividingBy: 60) == 0 }
+        if max(start, end ?? 0) >= 60, whole(start), end.map(whole) ?? true {
+            if let end {
+                return "\(Self.number(start / 60))–\(Self.number(end / 60)) min"
+            }
+            return "\(Self.number(start / 60)) min on"
+        }
         if let end {
             return "\(Self.number(start))–\(Self.number(end)) s"
         }
@@ -132,6 +140,8 @@ struct ShotPlan {
     var exposure: ExposureStyle = .auto
     /// Added to the camera's exposure: brighter for snow, darker for silhouettes.
     var exposureBias: Float = 0
+    /// Where you are in the frame, for the shots you're in. Shown under Setup on the How it works card.
+    var placement: String? = nil
 
     var isInShot: Bool { group == .inShot }
 
@@ -340,6 +350,159 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     }
 
     func plan(take: Int, inShot: Bool, variant: Int) -> ShotPlan {
+        var plan = basePlan(take: take, inShot: inShot, variant: variant)
+        plan.placement = placement(for: plan)
+        return plan
+    }
+
+    /// Where you are in the frame, for the shots you're in.
+    private func placement(for plan: ShotPlan) -> String? {
+        let firstHalf = plan.variantName == variants.first
+        switch self {
+        case .reaction:
+            return "Arm's length, your face in the top half of the frame. As you turn, the view comes in behind you."
+        case .wide:
+            return plan.isInShot
+                ? "Small, on the left or right third line and low in the frame, with your back to the lens, looking out at the view."
+                : nil
+        case .walkaway:
+            return "Start just beside the phone, out of shot. Walk straight away from it into the view and stop on a third "
+                + "line, small against it."
+        case .tele:
+            return "30 to 50 m out and tiny, on the bottom third: on a ridge, a rock or the shoreline, side-on or with your back "
+                + "to the lens."
+        case .moment:
+            return "In the lower half of the frame, side-on to the lens, with the view filling the top."
+        case .follow:
+            return "Only your arm: it reaches into the bottom of the frame, holding their hand. They're a step ahead, in the middle."
+        case .talk:
+            return "Head and shoulders, a little off centre, with your eyes on the top third line and the view behind you."
+        case .slomo:
+            return plan.isInShot ? "In the middle of the frame where the action is: mid-jump, at the water's edge or under the spray." : nil
+        case .secondAngle:
+            return "In the middle of the frame, side-on, so your other camera and the view you're filming are both in shot."
+        case .bodyWipe:
+            return firstHalf
+                ? "Just out of shot on the left to start, then walking past the lens close enough to fill the whole frame."
+                : "Right in front of the lens, filling the frame, then walking off to the right into the scene."
+        case .matchCut:
+            return "Exactly where your see-through outline was last time: the same spot, the same size, the same pose."
+        case .clone:
+            return "Three spots across the frame that don't overlap, all about the same distance from the phone."
+        case .jump:
+            return "In the middle, with the top edge of the frame just above your head."
+        case .silhouette:
+            return "Low in the frame against the brightest part of the sky, side-on, a little apart so there's sky between you."
+        case .dance:
+            return "Full body in the middle third of the frame, with space above your head and the view big behind you."
+        case .home:
+            return firstHalf
+                ? "In the middle of the frame, doing the ordinary thing: zipping your bag, at the window, sitting at the gate."
+                : "Lying in bed, your face lit by your phone, in the lower half of the frame."
+        default:
+            return nil
+        }
+    }
+
+    /// Optional tips on the How it works card.
+    var tips: [String] {
+        switch self {
+        case .onTheWay:
+            return ["A car's side mirror with the road behind it makes a great frame.",
+                    "Film from the shady side, and wipe the window first."]
+        case .reaction:
+            return ["Say what you'd really say. A real reaction beats a big one.",
+                    "Turn so the view ends up behind you, not beside you."]
+        case .reveal:
+            return ["The closer the thing blocking the view, the bigger the reveal.",
+                    "Golden hour reveals look best with the sun off to one side."]
+        case .timelapse:
+            return ["Clouds over peaks, shadows crossing a valley or a sunset work best.",
+                    "Something still in the foreground, like a rock or a tree, makes the movement behind it stand out.",
+                    "Plug in a power bank for long ones."]
+        case .wide:
+            return ["On the first WIDE of a place, leave sky above so there's room for a title.",
+                    "Stand still. The stillness is what makes it look cinematic."]
+        case .walkaway:
+            return ["Walk slower than feels natural.",
+                    "Follow a path or a ridge that leads into the view."]
+        case .tele:
+            return ["Put yourself under something huge, like a peak, a cliff or a waterfall. The 5x stacks it behind you.",
+                    "Wear something bright, like red or orange, so you stand out when you're tiny."]
+        case .moment:
+            return ["Lie back in the grass, a kiss in front of the view, walking hand in hand, a slow spin.",
+                    "Forget the camera and keep moving gently."]
+        case .follow:
+            return ["Keep your arm straight and the phone level.",
+                    "Flat ground is smoothest. Steps make it bounce."]
+        case .detail:
+            return ["Look for texture and movement: water drops, grass in the wind, light through leaves.",
+                    "Your hand touching something, like rock, water or a rail, makes it feel like you were there."]
+        case .food:
+            return ["Side light from a window looks best.",
+                    "Catch the first bite, the pour or the steam."]
+        case .pov:
+            return ["Lie back in the grass and film your boots with the view beyond them.",
+                    "Bend your knees and walk heel to toe to keep it smooth."]
+        case .talk:
+            return ["Say one specific thing: a fact, a feeling or a tip.",
+                    "Smile first and leave a beat at the end. It gives the edit room."]
+        case .ambient:
+            return ["Turn your body to block the wind.",
+                    "No talking or footsteps: the sound is the point."]
+        case .slomo:
+            return ["Bright light only. Slow motion goes grainy in the shade.",
+                    "A jump into water, a splash or a hair flick all work."]
+        case .transition, .bodyWipe, .whip, .jump:
+            return ["Move the same way in both halves, so the cut lines up.",
+                    self == .bodyWipe ? "A dark top wipes cleanest." : "Commit to it. A half-hearted move doesn't hide the cut."]
+        case .secondAngle:
+            return ["Good for a behind-the-scenes or how-I-got-the-shot reel."]
+        case .matchCut:
+            return ["Pick one pose, like arms out or a jump, and repeat it at every stop.",
+                    "Wear the same jacket each time so it reads as one journey."]
+        case .clone:
+            return ["Overcast light or shade works best, as shadows don't cut out.",
+                    "Do something different at each spot."]
+        case .rise:
+            return ["Rise with your legs, not your arms.",
+                    "The closer the foreground, the bigger the reveal."]
+        case .orbit:
+            return ["Keep them the same size all the way round.",
+                    "Slower looks smoother."]
+        case .dollyZoom:
+            return ["A far-off background, like mountains, shows the effect best.",
+                    "Check the ground behind you before you start."]
+        case .hyperlapse:
+            return ["Small, even steps, with the target in the crosshair.",
+                    "Paths, bridges and boardwalks give it somewhere to go."]
+        case .silhouette:
+            return ["Clear shapes read best: arms out, a jump, holding hands.",
+                    "Film in the 15 minutes either side of sunset, with the sun behind you."]
+        case .reflection:
+            return ["Calm water is best, often first thing in the morning.",
+                    "Someone walking through the scene makes it."]
+        case .sounds:
+            return ["Footsteps on gravel, a splash, a zip, a can opening.",
+                    "Block the wind with your body."]
+        case .dance:
+            return ["Know your part before you get there.",
+                    "At each new spot, carry on from 10 seconds before where you stopped."]
+        case .wildlife:
+            return ["Never feed or follow an animal. Stay back and let the 5x get close.",
+                    "Wait for a moment: a look up, a chew, a step."]
+        case .home:
+            return ["For the After half, turn the room lights off so it's just the phone's glow.",
+                    "Keep it simple and quiet: these start and end a reel."]
+        case .bRoll:
+            return ["Things that move are best: people walking, flags, water, traffic, clouds.",
+                    "Signs with the place's name are great for titles."]
+        case .voiceover, .quick:
+            return []
+        }
+    }
+
+    private func basePlan(take: Int, inShot: Bool, variant: Int) -> ShotPlan {
         let variantIndex = variants.isEmpty ? 0 : min(max(variant, 0), variants.count - 1)
         let variantName: String? = variants.isEmpty ? nil : variants[variantIndex]
 
@@ -391,7 +554,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 timelapseInterval: 1, autoStop: nil, manualLength: 600, countdown: 5,
                 before: "Tripod on solid ground. If the light is steady, hold on the screen to lock exposure.",
                 steps: [
-                    GuideStep(start: 0, end: nil, text: "Leave it running. 10 minutes makes 20 seconds of video.")
+                    GuideStep(start: 0, end: 60, text: "Step back and leave the tripod alone."),
+                    GuideStep(start: 60, end: 600, text: "Leave it running. 10 minutes makes 20 seconds of video."),
+                    GuideStep(start: 600, end: nil, text: "That's plenty. Stop whenever you like.")
                 ],
                 variantName: "1 frame a second")
 
@@ -510,7 +675,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 shot: self, take: take, group: .inHand,
                 lens: .wide, fps: 30, stabilisation: .cinematic,
                 autoStop: 6,
-                before: "Get close and tap the detail to focus first.",
+                before: "Get close to something small: moss, water, rock, a sign, your hands. Tap it to focus first.",
                 steps: [
                     GuideStep(start: 0, end: 1, text: "Hold steady."),
                     GuideStep(start: 1, end: 5, text: "Hold, or slide very slowly."),
@@ -522,7 +687,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 shot: self, take: take, group: .inHand,
                 lens: .wide, fps: 60, stabilisation: .strongest,
                 autoStop: 15,
-                before: "Phone at chest height.",
+                before: "Phone at chest height, pointing where you're going, with your feet, hands or the track ahead in frame.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Start moving slowly."),
                     GuideStep(start: 2, end: 12, text: "Walk smoothly: feet, hands, the track ahead."),
@@ -548,7 +713,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 autoStop: 20,
                 before: "Point at the sound: water, wind in the trees, birds.",
                 steps: [
-                    GuideStep(start: 0, end: 20, text: "Stay silent. Keep still.")
+                    GuideStep(start: 0, end: 2, text: "Point at the sound and hold."),
+                    GuideStep(start: 2, end: 18, text: "Stay silent. Keep still."),
+                    GuideStep(start: 18, end: 20, text: "Hold.")
                 ])
 
         case .slomo:
@@ -581,7 +748,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     shot: self, take: take, group: .inHand,
                     lens: .wide, fps: 30, stabilisation: .cinematic,
                     autoStop: 5,
-                    before: "This one ends a place.",
+                    before: "This one ends a place. Film the scene, then cover the lens with your palm.",
                     steps: [
                         GuideStep(start: 0, end: 2, text: "Film the scene."),
                         GuideStep(start: 2, end: 4, text: "Cover the lens with your hand."),
@@ -593,7 +760,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 shot: self, take: take, group: .inHand,
                 lens: .wide, fps: 30, stabilisation: .cinematic,
                 autoStop: 5,
-                before: "This one starts the next place.",
+                before: "This one starts the next place. Start with your palm over the lens, then pull it away.",
                 steps: [
                     GuideStep(start: 0, end: 1, text: "Start with your hand over the lens."),
                     GuideStep(start: 1, end: 3, text: "Pull your hand away."),
@@ -720,7 +887,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 before: "Anything that shows the place: a sign, people, traffic, flags in the wind, the car park, your boots. "
                     + "Keep the subject in the middle. It stops by itself, so grab a few in a row.",
                 steps: [
-                    GuideStep(start: 0, end: 5, text: "Hold still, or drift very slowly. Let things move in the frame.")
+                    GuideStep(start: 0, end: 1, text: "Frame it with the subject in the middle."),
+                    GuideStep(start: 1, end: 5, text: "Hold still, or drift very slowly. Let things move in the frame.")
                 ])
 
         case .quick:
@@ -876,8 +1044,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     + "starts during the countdown, so your part lands as recording starts. At each new spot, carry on from "
                     + "10 seconds before where you stopped, or dance it from the top.",
                 steps: [
-                    GuideStep(start: 0, end: nil,
-                              text: "Dance to the song. Stop with your remote or the red button, or let the song finish.")
+                    GuideStep(start: 0, end: 2, text: "In position as your part of the song comes in."),
+                    GuideStep(start: 2, end: nil,
+                              text: "Dance or lip-sync. Stop with your remote or the red button, or let the song finish.")
                 ])
 
         default:
