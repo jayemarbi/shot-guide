@@ -86,6 +86,8 @@ final class CameraController: NSObject, ObservableObject {
     private var config: CaptureConfig?
     private var exposureBias: Float = 0
     private var pinchStart: CGFloat = 1
+    /// Stop was pressed while a take was still waiting for the camera to be able to record.
+    private var startCancelled = false
 
     // Main-thread state
     private var mainConfig: CaptureConfig?
@@ -206,6 +208,11 @@ final class CameraController: NSObject, ObservableObject {
         } else {
             if session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
+                // Since iOS 26 the recorder can start a moment after the camera, so the picture shows sooner. Here it
+                // starts with the camera, so a take can begin the moment the camera is ready (a quick clip does).
+                if #available(iOS 26.0, *), movieOutput.isDeferredStartSupported {
+                    movieOutput.isDeferredStartEnabled = false
+                }
             }
             // A second, screen-sized feed for the preview, drawn through the look.
             previewOutput.alwaysDiscardsLateVideoFrames = true
@@ -543,9 +550,13 @@ final class CameraController: NSObject, ObservableObject {
                     if let reuse, reuse.lens == lens.rawValue {
                         gains = AVCaptureDevice.WhiteBalanceGains(redGain: reuse.red, greenGain: reuse.green, blueGain: reuse.blue)
                     }
-                    gains = Self.clampGains(gains, device: device)
-                    device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
-                    balance = Self.whiteBalance(gains, device: device, lens: lens)
+                    // Only real numbers: just after the camera opens it may not have worked the colour out yet,
+                    // and then it stays automatic for the take.
+                    if [gains.redGain, gains.greenGain, gains.blueGain].allSatisfy({ $0.isFinite && $0 > 0 }) {
+                        gains = Self.clampGains(gains, device: device)
+                        device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+                        balance = Self.whiteBalance(gains, device: device, lens: lens)
+                    }
                 } else if device.isWhiteBalanceModeSupported(.locked) {
                     device.whiteBalanceMode = .locked
                     balance = Self.whiteBalance(Self.clampGains(device.deviceWhiteBalanceGains, device: device), device: device, lens: lens)
@@ -553,8 +564,9 @@ final class CameraController: NSObject, ObservableObject {
                 device.unlockForConfiguration()
             } catch {}
             let seconds = CMTimeGetSeconds(device.exposureDuration)
+            let iso = device.iso
             let settings = TakeSettings(whiteBalance: balance,
-                                        iso: Int(device.iso.rounded()),
+                                        iso: iso.isFinite && iso > 0 ? Int(iso.rounded()) : nil,
                                         shutter: seconds.isFinite && seconds > 0 ? seconds : nil)
             DispatchQueue.main.async { completion(settings) }
         }
@@ -574,14 +586,15 @@ final class CameraController: NSObject, ObservableObject {
 
     static func clampGains(_ gains: AVCaptureDevice.WhiteBalanceGains, device: AVCaptureDevice) -> AVCaptureDevice.WhiteBalanceGains {
         let top = device.maxWhiteBalanceGain
-        func clamp(_ value: Float) -> Float { min(max(value, 1), top) }
+        func clamp(_ value: Float) -> Float { value.isFinite ? min(max(value, 1), top) : 1 }
         return AVCaptureDevice.WhiteBalanceGains(redGain: clamp(gains.redGain), greenGain: clamp(gains.greenGain), blueGain: clamp(gains.blueGain))
     }
 
     static func whiteBalance(_ gains: AVCaptureDevice.WhiteBalanceGains, device: AVCaptureDevice, lens: LensChoice) -> WhiteBalance {
         let values = device.temperatureAndTintValues(for: gains)
+        func whole(_ value: Float) -> Int { value.isFinite ? Int(value.rounded()) : 0 }
         return WhiteBalance(red: gains.redGain, green: gains.greenGain, blue: gains.blueGain,
-                            kelvin: Int(values.temperature.rounded()), tint: Int(values.tint.rounded()), lens: lens.rawValue)
+                            kelvin: whole(values.temperature), tint: whole(values.tint), lens: lens.rawValue)
     }
 
     // MARK: Recording
@@ -598,17 +611,38 @@ final class CameraController: NSObject, ObservableObject {
         let used: PhoneHold = mainConfig?.lens == .front ? .upright : hold
         activeSideways = used.isSideways
         sessionQueue.async {
+            self.startCancelled = false
             if let interval {
                 self.startLapse(to: url, interval: interval, hold: used, latitude: latitude, longitude: longitude)
             } else {
-                if let connection = self.movieOutput.connection(with: .video),
-                   connection.isVideoRotationAngleSupported(used.recordingAngle) {
-                    connection.videoRotationAngle = used.recordingAngle
-                }
-                self.movieOutput.metadata = Self.locationMetadata(latitude: latitude, longitude: longitude)
-                self.movieOutput.startRecording(to: url, recordingDelegate: self)
+                self.startMovie(to: url, hold: used, latitude: latitude, longitude: longitude, triesLeft: 20)
             }
         }
+    }
+
+    /// Starts the movie once the camera can record, on the session queue: straight away normally, or a moment later
+    /// if the camera has only just opened. Gives up after about 2 seconds, and the take is reported as not saved,
+    /// rather than the app crashing.
+    private func startMovie(to url: URL, hold: PhoneHold, latitude: Double?, longitude: Double?, triesLeft: Int) {
+        guard !startCancelled else { return }
+        let connection = movieOutput.connection(with: .video)
+        let ready = session.isRunning && session.outputs.contains(movieOutput)
+            && connection.map { $0.isEnabled && $0.isActive } == true
+        guard ready, let connection else {
+            if triesLeft > 0 {
+                sessionQueue.asyncAfter(deadline: .now() + 0.1) {
+                    self.startMovie(to: url, hold: hold, latitude: latitude, longitude: longitude, triesLeft: triesLeft - 1)
+                }
+            } else {
+                DispatchQueue.main.async { self.deliver(url: nil) }
+            }
+            return
+        }
+        if connection.isVideoRotationAngleSupported(hold.recordingAngle) {
+            connection.videoRotationAngle = hold.recordingAngle
+        }
+        movieOutput.metadata = Self.locationMetadata(latitude: latitude, longitude: longitude)
+        movieOutput.startRecording(to: url, recordingDelegate: self)
     }
 
     func stopRecording() {
@@ -623,7 +657,9 @@ final class CameraController: NSObject, ObservableObject {
             } else if self.movieOutput.isRecording {
                 self.movieOutput.stopRecording()
             } else {
-                // Stop was pressed before recording had started; try again in a moment.
+                // Stop was pressed before recording had started: don't let a waiting start go ahead, and try again in
+                // a moment in case it already has.
+                self.startCancelled = true
                 self.sessionQueue.asyncAfter(deadline: .now() + 0.5) {
                     if self.movieOutput.isRecording {
                         self.movieOutput.stopRecording()

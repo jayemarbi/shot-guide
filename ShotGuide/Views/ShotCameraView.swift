@@ -49,6 +49,8 @@ struct ShotCameraView: View {
     @State private var ghostZoom: Double? = nil
     @State private var zoomRestored = false
     @State private var autoStarted = false
+    /// The screen has been closed, so a quick clip waiting to start doesn't.
+    @State private var closed = false
     @State private var firedCues: Set<Int> = []
     @State private var takeMotion: TakeMotion? = nil
     /// White balance, ISO and shutter as the take started.
@@ -951,6 +953,7 @@ struct ShotCameraView: View {
     }
 
     private func finish() {
+        closed = true
         cancelCountdown()
         if camera.phase == .recording {
             camera.stopRecording()
@@ -975,7 +978,15 @@ struct ShotCameraView: View {
         }
         if autoStart && !autoStarted && reviewClip == nil && !permissionDenied {
             autoStarted = true
-            beginRecording()
+            // A second for the brightness and colour to settle before they're locked for the clip.
+            message = "Starting…"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                if message == "Starting…" {
+                    message = nil
+                }
+                guard !closed, camera.phase == .ready, reviewClip == nil, countdownRemaining == nil else { return }
+                beginRecording()
+            }
         }
     }
 
