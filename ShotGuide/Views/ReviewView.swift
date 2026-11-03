@@ -43,7 +43,7 @@ struct ReviewView: View {
     }
 
     /// Shot types a clip added from Photos can be given. Transitions need halves, so they're left out.
-    static let importChoices: [ShotType] = ShotType.allCases.filter { !$0.isTransition && $0 != .voiceover && $0 != .quick }
+    static let importChoices: [ShotType] = ShotType.allCases.filter { !$0.isTransition && $0 != .voiceover }
 
     private var clip: Clip? {
         store.trip(id: tripID)?.clips.first { $0.id == clipID }

@@ -12,8 +12,6 @@ struct ShotCameraView: View {
     let day: Int
     /// Opened from a transition's Out or In row: stick to that half for every take.
     let fixedVariant: Int?
-    /// Quick clip: start recording as soon as the camera is ready.
-    let autoStart: Bool
 
     @EnvironmentObject var store: TripStore
     @EnvironmentObject var location: LocationService
@@ -48,9 +46,6 @@ struct ShotCameraView: View {
     @State private var ghost: UIImage? = nil
     @State private var ghostZoom: Double? = nil
     @State private var zoomRestored = false
-    @State private var autoStarted = false
-    /// The screen has been closed, so a quick clip waiting to start doesn't.
-    @State private var closed = false
     @State private var firedCues: Set<Int> = []
     @State private var takeMotion: TakeMotion? = nil
     /// White balance, ISO and shutter as the take started.
@@ -69,14 +64,13 @@ struct ShotCameraView: View {
     @State private var songStartAtRecording: Double? = nil
     @State private var routeName = ""
 
-    init(tripID: UUID, shot: ShotType, day: Int, fixedVariant: Int? = nil, autoStart: Bool = false) {
+    init(tripID: UUID, shot: ShotType, day: Int, fixedVariant: Int? = nil) {
         self.tripID = tripID
         self.shot = shot
         self.day = day
         self.fixedVariant = fixedVariant
-        self.autoStart = autoStart
         _inShot = State(initialValue: shot.defaultGroup == .inShot)
-        _showBriefing = State(initialValue: !autoStart && (shot.defaultGroup == .inShot || !HowItWorks.seen(shot)))
+        _showBriefing = State(initialValue: shot.defaultGroup == .inShot || !HowItWorks.seen(shot))
     }
 
     /// The day's trip type, which tunes the takes, the tips and, for snow, the brightness.
@@ -124,9 +118,6 @@ struct ShotCameraView: View {
     }
 
     private var takeLabel: String {
-        if shot == .quick {
-            return "clip \(take)"
-        }
         if shot == .dance {
             return "take \(take)"
         }
@@ -258,7 +249,7 @@ struct ShotCameraView: View {
 
             facingLayer
 
-            if showBriefing && !isBusy && !permissionDenied && shot != .quick {
+            if showBriefing && !isBusy && !permissionDenied {
                 briefingCard
             }
 
@@ -680,7 +671,7 @@ struct ShotCameraView: View {
             }
             HStack {
                 Group {
-                    if !isBusy && shot != .quick {
+                    if !isBusy {
                         Button {
                             showBriefing = true
                         } label: {
@@ -930,7 +921,7 @@ struct ShotCameraView: View {
         take = store.nextTake(tripID: tripID, shot: shot, day: day)
         variant = variantFor(take: take)
         timing = TimingStore.load(shot, plan: plan)
-        showBriefing = !autoStart && (plan.isInShot || !HowItWorks.seen(shot))
+        showBriefing = plan.isInShot || !HowItWorks.seen(shot)
         level.start()
         UIDevice.current.isBatteryMonitoringEnabled = true
         readBattery()
@@ -956,7 +947,6 @@ struct ShotCameraView: View {
     }
 
     private func finish() {
-        closed = true
         cancelCountdown()
         if camera.phase == .recording {
             camera.stopRecording()
@@ -973,23 +963,11 @@ struct ShotCameraView: View {
         charging = device.batteryState == .charging || device.batteryState == .full
     }
 
-    /// Each time the camera is ready: put MATCH CUT's zoom back, and start a quick clip straight away.
+    /// Each time the camera is ready: put MATCH CUT's zoom back where the last one was.
     private func cameraReady() {
         if let ghostZoom, !zoomRestored {
             zoomRestored = true
             camera.setZoom(display: ghostZoom)
-        }
-        if autoStart && !autoStarted && reviewClip == nil && !permissionDenied {
-            autoStarted = true
-            // A second for the brightness and colour to settle before they're locked for the clip.
-            message = "Starting…"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                if message == "Starting…" {
-                    message = nil
-                }
-                guard !closed, camera.phase == .ready, reviewClip == nil, countdownRemaining == nil else { return }
-                beginRecording()
-            }
         }
     }
 
@@ -1093,7 +1071,7 @@ struct ShotCameraView: View {
 
     private func planChanged() {
         timing = TimingStore.load(shot, plan: plan)
-        showBriefing = !autoStart && (plan.isInShot || !HowItWorks.seen(shot))
+        showBriefing = plan.isInShot || !HowItWorks.seen(shot)
         if cameraAllowed {
             camera.configure(plan.captureConfig)
         }
@@ -1407,7 +1385,7 @@ struct ShotCameraView: View {
         if shot == .dance {
             danceStart = carryOnPoint == nil ? .fromTop : .carryOn
         }
-        guard let trip = store.trip(id: tripID), shot != .quick, shot != .dance else { return }
+        guard let trip = store.trip(id: tripID), shot != .dance else { return }
         if let fixedVariant {
             // One half of a transition: done once that half has a take.
             let half = ShotSlot(shot: shot, half: fixedVariant)

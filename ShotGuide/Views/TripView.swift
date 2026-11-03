@@ -87,8 +87,7 @@ struct TripView: View {
         if slot.shot == .voiceover {
             VoiceoverView(tripID: tripID, day: currentDay)
         } else {
-            ShotCameraView(tripID: tripID, shot: slot.shot, day: currentDay, fixedVariant: slot.half,
-                           autoStart: slot.shot == .quick)
+            ShotCameraView(tripID: tripID, shot: slot.shot, day: currentDay, fixedVariant: slot.half)
         }
     }
 
@@ -180,7 +179,6 @@ struct TripView: View {
                         .font(.subheadline)
                 }
             }
-            quickClipRow
             typeRow(day)
             lightRow(trip)
             if trip.clips(onDay: number).isEmpty {
@@ -192,26 +190,6 @@ struct TripView: View {
 
     private func regionText(_ trip: Trip, day: TripDay) -> String {
         [day.place, trip.regionLine].filter { !$0.isEmpty }.joined(separator: " · ")
-    }
-
-    /// Straight to recording, for something that won't wait.
-    private var quickClipRow: some View {
-        Button {
-            activeSlot = ShotSlot(shot: .quick, half: nil)
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "bolt.fill")
-                    .frame(width: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Quick clip")
-                        .font(.headline)
-                    Text("Starts filming straight away, for moments that won't wait")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .foregroundStyle(Color.orange)
     }
 
     private func typeRow(_ day: TripDay) -> some View {

@@ -248,8 +248,6 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case bRoll = "BROLL"
     /// Dancing or lip-syncing to a song that plays in your AirPods, timed to the recording.
     case dance = "DANCE"
-    /// Quick clip: straight to recording with no guidance, for moments that won't wait.
-    case quick = "QUICK"
 
     var id: String { rawValue }
 
@@ -260,7 +258,6 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .onTheWay: return "ON THE WAY"
         case .matchCut: return "MATCH CUT"
         case .dollyZoom: return "DOLLY ZOOM"
-        case .quick: return "QUICK CLIP"
         case .bRoll: return "B-ROLL"
         default: return rawValue
         }
@@ -279,12 +276,12 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     var isTransition: Bool { self == .transition || self == .bodyWipe || self == .whip || self == .jump }
 
     /// Extras depend on the day (a partner to follow, food, animals, an interesting trip there), so they
-    /// don't count towards a trip's total. Nor do the transitions, the creative shots, SECOND ANGLE and quick
-    /// clips. MATCH CUT and SILHOUETTE count: the saved reels use them a lot.
+    /// don't count towards a trip's total. Nor do the transitions, the creative shots and SECOND ANGLE.
+    /// MATCH CUT and SILHOUETTE count: the saved reels use them a lot.
     var countsTowardTotal: Bool {
         switch self {
         case .bodyWipe, .whip, .transition, .follow, .food, .onTheWay, .voiceover, .wildlife, .home, .secondAngle: return false
-        case .clone, .jump, .rise, .orbit, .dollyZoom, .hyperlapse, .reflection, .sounds, .dance, .quick:
+        case .clone, .jump, .rise, .orbit, .dollyZoom, .hyperlapse, .reflection, .sounds, .dance:
             return false
         default: return true
         }
@@ -381,7 +378,6 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .wildlife: return "Animals up close, on the 5x"
         case .home: return "Before you go and after you're back"
         case .bRoll: return "5 seconds of anything that shows the place"
-        case .quick: return "Straight to recording, no guidance"
         }
     }
 
@@ -570,7 +566,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .bRoll:
             return ["Things that move are best: people walking, flags, water, traffic, clouds.",
                     "Signs with the place's name are great for titles."]
-        case .voiceover, .quick:
+        case .voiceover:
             return []
         }
     }
@@ -963,14 +959,6 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 0, end: 1, text: "Frame it with the subject in the middle."),
                     GuideStep(start: 1, end: 5, text: "Hold still, or drift very slowly. Let things move in the frame.")
                 ])
-
-        case .quick:
-            return ShotPlan(
-                shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 60, stabilisation: .cinematic,
-                autoStop: nil, manualLength: 30, countdown: 0,
-                before: "",
-                steps: [GuideStep(start: 0, end: nil, text: "Rolling. Stop when you're done.")])
 
         default:
             return creativePlan(take: take, variant: variantIndex, variantName: variantName)

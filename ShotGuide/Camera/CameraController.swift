@@ -213,7 +213,7 @@ final class CameraController: NSObject, ObservableObject {
             if session.canAddOutput(movieOutput) {
                 session.addOutput(movieOutput)
                 // Since iOS 26 the recorder can start a moment after the camera, so the picture shows sooner. Here it
-                // starts with the camera, so a take can begin the moment the camera is ready (a quick clip does).
+                // starts with the camera, so a take can begin the moment the camera is ready.
                 if #available(iOS 26.0, *), movieOutput.isDeferredStartSupported {
                     movieOutput.isDeferredStartEnabled = false
                 }
@@ -246,11 +246,6 @@ final class CameraController: NSObject, ObservableObject {
                 device.unlockForConfiguration()
             } catch {}
         }
-        let front = config.lens == .front
-        dataQueue.async {
-            self.previewFront = front
-            self.previewLog = usingLog
-        }
 
         let connection = isLapse ? dataOutput.connection(with: .video) : movieOutput.connection(with: .video)
         if let connection {
@@ -280,6 +275,19 @@ final class CameraController: NSObject, ObservableObject {
             }
         }
         session.commitConfiguration()
+
+        // HEVC is chosen again now the format is in place. Chosen only inside the configuration, it can be reset to the
+        // format's default, which for Apple Log is ProRes: ProRes can't film 4K60 to the phone (only to an external
+        // drive), and its files are huge. If this format can't do HEVC in Log, the shot films in the normal colour.
+        if !isLapse {
+            usingLog = chooseHEVC(device: device, config: config, usingLog: usingLog)
+        }
+        let front = config.lens == .front
+        let previewInLog = usingLog
+        dataQueue.async {
+            self.previewFront = front
+            self.previewLog = previewInLog
+        }
 
         // Frame rate, zoom, focus and exposure go on after the commit, because adding an input resets them.
         let fps = Self.clampFPS(config.fps, format: device.activeFormat)
@@ -334,6 +342,34 @@ final class CameraController: NSObject, ObservableObject {
             self.displayZoom = startZoom
             self.phase = .ready
         }
+    }
+
+    /// Sets the movie to HEVC, on the session queue after the configuration is committed. If the format can't do HEVC
+    /// in Apple Log, it switches this shot to the normal-colour format, which can. Returns whether it's still Log.
+    private func chooseHEVC(device: AVCaptureDevice, config: CaptureConfig, usingLog: Bool) -> Bool {
+        guard let connection = movieOutput.connection(with: .video) else { return usingLog }
+        if movieOutput.availableVideoCodecTypes.contains(.hevc) {
+            movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+            return usingLog
+        }
+        guard usingLog, let normal = Self.pickFormat(device: device, fps: config.fps) else { return usingLog }
+        do {
+            try device.lockForConfiguration()
+            device.activeFormat = normal
+            if normal.supportedColorSpaces.contains(.sRGB) {
+                device.activeColorSpace = .sRGB
+            }
+            device.unlockForConfiguration()
+        } catch {
+            return usingLog
+        }
+        if connection.isVideoStabilizationSupported {
+            connection.preferredVideoStabilizationMode = Self.stabilisationMode(config.stabilisation, format: normal)
+        }
+        if movieOutput.availableVideoCodecTypes.contains(.hevc) {
+            movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+        }
+        return false
     }
 
     // MARK: Lenses and zoom
@@ -640,6 +676,11 @@ final class CameraController: NSObject, ObservableObject {
             }
             movieOutput.metadata = Self.locationMetadata(latitude: latitude, longitude: longitude)
             let refused = SGCatchException {
+                // HEVC again right before recording, as Apple's own camera sample does, so the codec can't have slipped
+                // back to ProRes.
+                if self.movieOutput.availableVideoCodecTypes.contains(.hevc) {
+                    self.movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
+                }
                 self.movieOutput.startRecording(to: url, recordingDelegate: self)
             }
             problem = refused.map { Self.shortReason($0.reason ?? $0.name.rawValue) }
