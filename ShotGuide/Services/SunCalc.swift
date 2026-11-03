@@ -60,6 +60,21 @@ enum SunCalc {
         return Light(label: "Day", tags: [])
     }
 
+    /// Golden hour (the sun up to 6° high) and blue hour (up to 6° below the horizon), when the light has a colour
+    /// worth keeping.
+    enum Glow {
+        case golden
+        case blue
+    }
+
+    static func glow(at date: Date, latitude: Double?, longitude: Double?) -> Glow? {
+        guard let latitude, let longitude else { return nil }
+        let degrees = elevation(at: date, latitude: latitude, longitude: longitude).degrees
+        if degrees >= -6 && degrees < 0 { return .blue }
+        if degrees >= 0 && degrees < 6 { return .golden }
+        return nil
+    }
+
     /// Sunrise and sunset are when the top of the sun meets the horizon, a little below 0°.
     static let horizon = -0.833
 

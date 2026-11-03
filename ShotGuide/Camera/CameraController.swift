@@ -573,10 +573,13 @@ final class CameraController: NSObject, ObservableObject {
 
     // MARK: White balance for a take
 
-    /// Locks the white balance for a take, so the colour can't drift partway through: to `reuse` (from a take
-    /// just before, at the same spot, on the same lens) or to what the camera has settled on. Reports it,
-    /// with the ISO and shutter speed, for the catalogue.
-    func beginTake(reuse: WhiteBalance?, lens: LensChoice, completion: @escaping (TakeSettings) -> Void) {
+    /// Daylight, in kelvin: what golden and blue hour lock to, so warm light stays warm and blue light stays blue.
+    static let daylightKelvin: Float = 5600
+
+    /// Locks the white balance for a take, so the colour can't drift partway through: to daylight in golden and blue
+    /// hour, to `reuse` (from a take just before, at the same spot, on the same lens), or to what the camera has
+    /// settled on. Reports it, with the ISO and shutter speed, for the catalogue.
+    func beginTake(reuse: WhiteBalance?, daylight: Bool, lens: LensChoice, completion: @escaping (TakeSettings) -> Void) {
         sessionQueue.async {
             guard let device = self.device else {
                 DispatchQueue.main.async { completion(TakeSettings()) }
@@ -587,7 +590,9 @@ final class CameraController: NSObject, ObservableObject {
                 try device.lockForConfiguration()
                 if device.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
                     var gains = device.deviceWhiteBalanceGains
-                    if let reuse, reuse.lens == lens.rawValue {
+                    if daylight {
+                        gains = Self.daylightGains(device)
+                    } else if let reuse, reuse.lens == lens.rawValue {
                         gains = AVCaptureDevice.WhiteBalanceGains(redGain: reuse.red, greenGain: reuse.green, blueGain: reuse.blue)
                     }
                     // Only real numbers: just after the camera opens it may not have worked the colour out yet,
@@ -610,6 +615,29 @@ final class CameraController: NSObject, ObservableObject {
                                         shutter: seconds.isFinite && seconds > 0 ? seconds : nil)
             DispatchQueue.main.async { completion(settings) }
         }
+    }
+
+    /// In golden and blue hour the white balance stays on daylight between takes too, so the picture on screen has
+    /// the colour the takes will have. Otherwise it's automatic.
+    func setDaylightLock(_ on: Bool) {
+        sessionQueue.async {
+            guard let device = self.device else { return }
+            do {
+                try device.lockForConfiguration()
+                if on, device.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
+                    device.setWhiteBalanceModeLocked(with: Self.clampGains(Self.daylightGains(device), device: device),
+                                                     completionHandler: nil)
+                } else if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                    device.whiteBalanceMode = .continuousAutoWhiteBalance
+                }
+                device.unlockForConfiguration()
+            } catch {}
+        }
+    }
+
+    static func daylightGains(_ device: AVCaptureDevice) -> AVCaptureDevice.WhiteBalanceGains {
+        device.deviceWhiteBalanceGains(for: AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: daylightKelvin,
+                                                                                                tint: 0))
     }
 
     /// Back to automatic white balance after a take.

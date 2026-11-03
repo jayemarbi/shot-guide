@@ -275,6 +275,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// Transitions come in two halves: Out ends a place, In starts the next.
     var isTransition: Bool { self == .transition || self == .bodyWipe || self == .whip || self == .jump }
 
+    /// Often filmed inside, where the room's lights set the colour, so golden and blue hour leave them on automatic.
+    var oftenIndoors: Bool { self == .food || self == .home }
+
     /// Extras depend on the day (a partner to follow, food, animals, an interesting trip there), so they
     /// don't count towards a trip's total. Nor do the transitions, the creative shots and SECOND ANGLE.
     /// MATCH CUT and SILHOUETTE count: the saved reels use them a lot.

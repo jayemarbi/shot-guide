@@ -41,6 +41,8 @@ struct ShotCameraView: View {
     @State private var marks: [Double] = []
     @State private var markNote: String? = nil
     @State private var lowLight = false
+    /// Golden or blue hour when the white balance was last set between takes.
+    @State private var lockedGlow: SunCalc.Glow? = nil
     @State private var micName = ""
     /// MATCH CUT: a still of the last one, and the zoom it used.
     @State private var ghost: UIImage? = nil
@@ -63,6 +65,9 @@ struct ShotCameraView: View {
     @State private var showPointPicker = false
     @State private var songStartAtRecording: Double? = nil
     @State private var routeName = ""
+
+    /// Ticks every 30 seconds, to notice golden and blue hour starting and ending while the camera is open.
+    private let lightClock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     init(tripID: UUID, shot: ShotType, day: Int, fixedVariant: Int? = nil) {
         self.tripID = tripID
@@ -294,6 +299,7 @@ struct ShotCameraView: View {
                     cameraReady()
                 }
             }
+            .onReceive(lightClock) { _ in refreshLightLock() }
             .onAppear(perform: start)
             .onDisappear(perform: finish)
             .onChange(of: camera.elapsed) { _, value in
@@ -378,6 +384,12 @@ struct ShotCameraView: View {
                         .font(.caption)
                         .foregroundStyle(Color.white.opacity(0.8))
                     filmingLine
+                    if let glow = glowNow {
+                        Label(glow == .golden ? "Golden hour: keeping the warm light" : "Blue hour: keeping the blue light",
+                              systemImage: glow == .golden ? "sun.horizon.fill" : "moon.stars.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(glow == .golden ? Color.orange : Color.cyan)
+                    }
                     if isTalkingShot && !micName.isEmpty {
                         Label("Mic: \(micName)", systemImage: "mic.fill")
                             .font(.caption)
@@ -963,12 +975,30 @@ struct ShotCameraView: View {
         charging = device.batteryState == .charging || device.batteryState == .full
     }
 
-    /// Each time the camera is ready: put MATCH CUT's zoom back where the last one was.
+    /// Each time the camera is ready: put MATCH CUT's zoom back where the last one was, and set the white balance for
+    /// golden and blue hour.
     private func cameraReady() {
         if let ghostZoom, !zoomRestored {
             zoomRestored = true
             camera.setZoom(display: ghostZoom)
         }
+        lockedGlow = glowNow
+        camera.setDaylightLock(lockedGlow != nil)
+    }
+
+    /// Golden or blue hour right now, for a shot filmed outside. Then the white balance locks to daylight, so warm
+    /// light stays warm and blue light stays blue instead of being evened out.
+    private var glowNow: SunCalc.Glow? {
+        guard !shot.oftenIndoors, let coordinate = location.location?.coordinate else { return nil }
+        return SunCalc.glow(at: Date(), latitude: coordinate.latitude, longitude: coordinate.longitude)
+    }
+
+    /// Checked every 30 seconds, for when golden hour starts or blue hour ends while the camera is open.
+    private func refreshLightLock() {
+        let glow = glowNow
+        guard glow != lockedGlow, camera.phase == .ready, countdownRemaining == nil else { return }
+        lockedGlow = glow
+        camera.setDaylightLock(glow != nil)
     }
 
     /// MATCH CUT: the most recent one on the phone, from any trip, as a see-through still and its zoom.
@@ -1074,6 +1104,9 @@ struct ShotCameraView: View {
         showBriefing = plan.isInShot || !HowItWorks.seen(shot)
         if cameraAllowed {
             camera.configure(plan.captureConfig)
+            // Setting the camera up again puts the white balance back on automatic.
+            lockedGlow = glowNow
+            camera.setDaylightLock(lockedGlow != nil)
         }
     }
 
@@ -1169,12 +1202,13 @@ struct ShotCameraView: View {
             camera.lockFocusAndExposure()
         }
         level.beginTake()
-        // Lock the white balance for the take; a take just before at the same spot on the same lens shares it,
-        // so they match in the edit.
+        // Lock the white balance for the take: to daylight in golden and blue hour, otherwise shared with a take just
+        // before at the same spot on the same lens, so they match in the edit.
         takeSettings = nil
-        let reuse = Self.sameSpotWhiteBalance(in: store.trip(id: tripID), latitude: coordinate?.latitude,
-                                              longitude: coordinate?.longitude, at: now, lens: used.lens)
-        camera.beginTake(reuse: reuse, lens: used.lens) { settings in
+        let glow = glowNow
+        let reuse = glow == nil ? Self.sameSpotWhiteBalance(in: store.trip(id: tripID), latitude: coordinate?.latitude,
+                                                            longitude: coordinate?.longitude, at: now, lens: used.lens) : nil
+        camera.beginTake(reuse: reuse, daylight: glow != nil, lens: used.lens) { settings in
             takeSettings = settings
         }
         songStartAtRecording = nil
