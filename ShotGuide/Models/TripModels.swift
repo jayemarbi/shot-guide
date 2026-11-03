@@ -175,12 +175,37 @@ struct Trip: Codable, Identifiable, Hashable {
     /// Relative to the app's Documents folder, e.g. "Library/Oceania/Australia/Queensland/2026-11-08 Mount Barney".
     var folderPath: String
     var clips: [Clip] = []
+    /// Facts from before 1.18, when a trip had one set. They now belong to the first day's place.
     var facts: TripFacts? = nil
+    /// Facts for each place, by its name, so days at the same place share them.
+    var placeFacts: [String: TripFacts]? = nil
     /// Every day of the trip, from day 1. nil for trips from before days existed: they have one General day.
     var days: [TripDay]? = nil
 
     var regionLine: String {
         [state, country].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// The facts about a day's place.
+    func dayFacts(_ number: Int) -> TripFacts? {
+        let place = day(number).place
+        if let saved = placeFacts?[place] {
+            return saved
+        }
+        return place == allDays.first?.place ? facts : nil
+    }
+
+    /// Each place's facts once, in the order of the days, for facts.txt.
+    var factsText: String? {
+        var places: [String] = []
+        var sections: [String] = []
+        for day in allDays where !places.contains(day.place) {
+            places.append(day.place)
+            if let facts = dayFacts(day.number), !facts.isEmpty {
+                sections.append(day.place + "\n\n" + facts.text)
+            }
+        }
+        return sections.isEmpty ? nil : sections.joined(separator: "\n")
     }
 
     var allDays: [TripDay] {

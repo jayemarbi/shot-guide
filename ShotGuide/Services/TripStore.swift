@@ -60,8 +60,8 @@ final class TripStore: ObservableObject {
         let csv = Self.catalogCSV(for: trip)
         try Data(csv.utf8).write(to: folder.appendingPathComponent("catalog.csv"), options: .atomic)
         let factsURL = folder.appendingPathComponent("facts.txt")
-        if let facts = trip.facts, !facts.isEmpty {
-            try Data(("\(trip.place)\n\n" + facts.text).utf8).write(to: factsURL, options: .atomic)
+        if let text = trip.factsText {
+            try Data(text.utf8).write(to: factsURL, options: .atomic)
         } else {
             try? FileManager.default.removeItem(at: factsURL)
         }
@@ -120,9 +120,17 @@ final class TripStore: ObservableObject {
         trips.removeAll { $0.id == id }
     }
 
-    func updateFacts(_ facts: TripFacts, tripID: UUID) {
+    /// Saves the facts about a day's place. Other days at the same place share them.
+    func updateFacts(_ facts: TripFacts, tripID: UUID, day number: Int) {
         guard var trip = self.trip(id: tripID) else { return }
-        trip.facts = facts.isEmpty ? nil : facts
+        let place = trip.day(number).place
+        var all = trip.placeFacts ?? [:]
+        all[place] = facts.isEmpty ? nil : facts
+        trip.placeFacts = all.isEmpty ? nil : all
+        if place == trip.allDays.first?.place {
+            // Facts from before 1.18 were for the first day's place, and these replace them.
+            trip.facts = nil
+        }
         replace(trip)
     }
 

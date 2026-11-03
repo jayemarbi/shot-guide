@@ -6,7 +6,7 @@ enum ClipPrep {
     static let talkingShots: Set<String> = [
         ShotType.talk.rawValue,
         ShotType.reaction.rawValue,
-        ShotType.secondAngle.rawValue,
+        ShotType.stay.rawValue,
         ShotType.voiceover.rawValue
     ]
 

@@ -42,8 +42,14 @@ struct ReviewView: View {
         case failed(String)
     }
 
-    /// Shot types a clip added from Photos can be given. Transitions need halves, so they're left out.
-    static let importChoices: [ShotType] = ShotType.allCases.filter { !$0.isTransition && $0 != .voiceover }
+    /// Shot types a clip added from Photos can be given, in the trip page's order. WHIP needs halves, so it's left out.
+    static let importChoices: [ShotType] = {
+        var choices: [ShotType] = []
+        for slot in TripPhase.allSlots where !slot.shot.isTransition && slot.shot != .voiceover && !choices.contains(slot.shot) {
+            choices.append(slot.shot)
+        }
+        return choices
+    }()
 
     private var clip: Clip? {
         store.trip(id: tripID)?.clips.first { $0.id == clipID }

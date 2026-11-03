@@ -234,7 +234,7 @@ struct TripView: View {
                 slotRow(slot, trip: trip, day: number)
             }
             if phase.showsTripFacts {
-                factsRow(trip)
+                factsRow(trip, day: number)
             }
         } header: {
             Text(phase.title)
@@ -252,7 +252,8 @@ struct TripView: View {
         } header: {
             Text("From other cameras")
         } footer: {
-            Text("Star time-lapses, Cinematic mode, drone or GoPro clips and photos. They're named, tagged and copied to your SSD like the rest.")
+            Text("Star time-lapses, Cinematic mode, drone or GoPro clips and photos, and screenshots of maps and bookings for guides. "
+                + "They're named, tagged and copied to your SSD like the rest.")
         }
     }
 
@@ -280,7 +281,7 @@ struct TripView: View {
     private func sheets<Page: View>(_ view: Page) -> some View {
         view
             .sheet(isPresented: $showFacts) {
-                TripFactsView(tripID: tripID)
+                TripFactsView(tripID: tripID, day: currentDay)
             }
             .sheet(isPresented: $showStartDay) {
                 StartDaySheet(tripID: tripID) { number in
@@ -385,10 +386,12 @@ struct TripView: View {
         lastCopy = nil
     }
 
-    private static let factsHint = "Distance, time, cost, tips: for on-screen text and guide reels"
+    private static let factsHint = "Distance, time, cost and tips about this place, for on-screen text and guide reels"
 
-    private func factsRow(_ trip: Trip) -> some View {
-        let summary = trip.facts?.summary ?? ""
+    /// The facts about this day's place. Days at the same place share them.
+    private func factsRow(_ trip: Trip, day: Int) -> some View {
+        let facts = trip.dayFacts(day)
+        let summary = facts?.summary ?? ""
         return Button {
             showFacts = true
         } label: {
@@ -397,14 +400,14 @@ struct TripView: View {
                     .frame(width: 28)
                     .foregroundStyle(Color.orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("TRIP FACTS")
+                    Text("PLACE FACTS")
                         .font(.headline)
                     Text(summary.isEmpty ? Self.factsHint : summary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if trip.facts != nil {
+                if facts != nil {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(Color.green)
                 }

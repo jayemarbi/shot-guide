@@ -1,13 +1,18 @@
 import SwiftUI
 
-/// Details about the place, for text on screen and "things to know before you go" reels.
+/// Details about a day's place, for text on screen and guide reels. Days at the same place share them.
 struct TripFactsView: View {
     let tripID: UUID
+    let day: Int
 
     @EnvironmentObject var store: TripStore
     @Environment(\.dismiss) private var dismiss
     @State private var facts = TripFacts()
     @State private var loaded = false
+
+    private var place: String {
+        (store.trip(id: tripID)?.day(day).place ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         NavigationStack {
@@ -41,10 +46,12 @@ struct TripFactsView: View {
                 } header: {
                     Text("Tips")
                 } footer: {
-                    Text("Fill in whatever you know. These go into the trip's folder for on-screen text and \"things to know\" reels.")
+                    Text("Fill in whatever you know about \(place.isEmpty ? "this place" : place). Each place on the trip "
+                         + "has its own facts, and they all go into facts.txt in the trip's folder, for on-screen text and "
+                         + "guide reels.")
                 }
             }
-            .navigationTitle("Trip facts")
+            .navigationTitle(place.isEmpty ? "Place facts" : place)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -52,7 +59,7 @@ struct TripFactsView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        store.updateFacts(facts, tripID: tripID)
+                        store.updateFacts(facts, tripID: tripID, day: day)
                         dismiss()
                     }
                 }
@@ -60,7 +67,7 @@ struct TripFactsView: View {
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
-                facts = store.trip(id: tripID)?.facts ?? TripFacts()
+                facts = store.trip(id: tripID)?.dayFacts(day) ?? TripFacts()
             }
         }
     }

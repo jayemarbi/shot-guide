@@ -158,7 +158,7 @@ struct ShotCameraView: View {
             get: { timing },
             set: { newValue in
                 timing = newValue
-                TimingStore.save(newValue, shot: shot, inShot: plan.isInShot)
+                TimingStore.save(newValue, shot: shot, plan: plan)
             })
     }
 
@@ -1035,8 +1035,6 @@ struct ShotCameraView: View {
         switch plan.overlay {
         case .ghost?:
             ghostOverlay
-        case .sizeBox?:
-            sizeBox
         case .crosshair?:
             crosshair
         case nil:
@@ -1063,26 +1061,6 @@ struct ShotCameraView: View {
             .opacity(0.35)
             .ignoresSafeArea()
         }
-    }
-
-    private var sizeBox: some View {
-        sizeBoxShape
-            .rotationEffect(.degrees(level.hold.screenRotation))
-    }
-
-    private var sizeBoxShape: some View {
-        RoundedRectangle(cornerRadius: 16)
-            .stroke(Color.yellow.opacity(0.9), style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-            .frame(width: 230, height: 280)
-            .overlay(alignment: .top) {
-                Text("Head and shoulders")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.55), in: Capsule())
-                    .foregroundStyle(Color.yellow)
-                    .offset(y: -26)
-            }
     }
 
     private var crosshair: some View {
