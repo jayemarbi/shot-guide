@@ -71,6 +71,10 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var displayZoom: Double = 1
     /// This shot records in Apple Log.
     @Published private(set) var logActive = false
+    /// Why the last take couldn't start recording, in the camera's words. nil when it started.
+    @Published private(set) var startProblem: String? = nil
+    /// The file is actually recording (it can take a moment after recording is asked for).
+    @Published private(set) var rolling = false
 
     let session = AVCaptureSession()
 
@@ -610,39 +614,54 @@ final class CameraController: NSObject, ObservableObject {
         let interval = mainConfig?.timelapseInterval
         let used: PhoneHold = mainConfig?.lens == .front ? .upright : hold
         activeSideways = used.isSideways
+        startProblem = nil
+        rolling = false
         sessionQueue.async {
             self.startCancelled = false
             if let interval {
                 self.startLapse(to: url, interval: interval, hold: used, latitude: latitude, longitude: longitude)
             } else {
-                self.startMovie(to: url, hold: used, latitude: latitude, longitude: longitude, triesLeft: 20)
+                self.startMovie(to: url, hold: used, latitude: latitude, longitude: longitude, triesLeft: 60)
             }
         }
     }
 
-    /// Starts the movie once the camera can record, on the session queue: straight away normally, or a moment later
-    /// if the camera has only just opened. Gives up after about 2 seconds, and the take is reported as not saved,
-    /// rather than the app crashing.
+    /// Starts the movie once the camera can record, on the session queue. Since iOS 26 the recorder only gets going
+    /// a moment after the camera opens, and asking it to record before then raises an exception that would crash the
+    /// app. So a refusal is caught and the start tried again every 0.1 seconds. After about 6 seconds it gives up and
+    /// the take is reported as not saved, with what the camera said.
     private func startMovie(to url: URL, hold: PhoneHold, latitude: Double?, longitude: Double?, triesLeft: Int) {
         guard !startCancelled else { return }
+        var problem: String? = "The camera isn't running."
         let connection = movieOutput.connection(with: .video)
-        let ready = session.isRunning && session.outputs.contains(movieOutput)
-            && connection.map { $0.isEnabled && $0.isActive } == true
-        guard ready, let connection else {
-            if triesLeft > 0 {
-                sessionQueue.asyncAfter(deadline: .now() + 0.1) {
-                    self.startMovie(to: url, hold: hold, latitude: latitude, longitude: longitude, triesLeft: triesLeft - 1)
-                }
-            } else {
-                DispatchQueue.main.async { self.deliver(url: nil) }
+        if session.isRunning, session.outputs.contains(movieOutput), let connection, connection.isEnabled, connection.isActive {
+            if connection.isVideoRotationAngleSupported(hold.recordingAngle) {
+                connection.videoRotationAngle = hold.recordingAngle
             }
-            return
+            movieOutput.metadata = Self.locationMetadata(latitude: latitude, longitude: longitude)
+            let refused = SGCatchException {
+                self.movieOutput.startRecording(to: url, recordingDelegate: self)
+            }
+            problem = refused.map { Self.shortReason($0.reason ?? $0.name.rawValue) }
         }
-        if connection.isVideoRotationAngleSupported(hold.recordingAngle) {
-            connection.videoRotationAngle = hold.recordingAngle
+        guard let problem else { return }
+        if triesLeft > 0 {
+            sessionQueue.asyncAfter(deadline: .now() + 0.1) {
+                self.startMovie(to: url, hold: hold, latitude: latitude, longitude: longitude, triesLeft: triesLeft - 1)
+            }
+        } else {
+            DispatchQueue.main.async {
+                self.startProblem = problem
+                self.deliver(url: nil)
+            }
         }
-        movieOutput.metadata = Self.locationMetadata(latitude: latitude, longitude: longitude)
-        movieOutput.startRecording(to: url, recordingDelegate: self)
+    }
+
+    /// AVFoundation's reasons start with the method's name, like "*** -[AVCaptureMovieFileOutput ...] No active/enabled
+    /// connections". This keeps the words after it.
+    static func shortReason(_ text: String) -> String {
+        guard let range = text.range(of: "] ") else { return text }
+        return String(text[range.upperBound...])
     }
 
     func stopRecording() {
@@ -672,6 +691,7 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     private func recordingStarted() {
+        rolling = true
         startTime = CACurrentMediaTime()
         onRecordingStarted?()
         elapsed = 0
@@ -683,6 +703,7 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     private func deliver(url: URL?) {
+        rolling = false
         ticker?.invalidate()
         ticker = nil
         let result = url.map {

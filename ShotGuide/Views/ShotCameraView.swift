@@ -450,6 +450,9 @@ struct ShotCameraView: View {
         if camera.phase == .recording {
             if plan.timelapseInterval != nil {
                 lapseTimer
+            } else if !camera.rolling {
+                // Asked to record, but the camera hasn't started yet: just after it opens, that can take a moment.
+                notice("Starting…")
             } else if !plan.isInShot {
                 promptCard
             }
@@ -1256,7 +1259,11 @@ struct ShotCameraView: View {
         let motion = takeMotion ?? level.endTake()
         takeMotion = nil
         guard let result else {
-            message = "That take didn't save. Try again."
+            if let problem = camera.startProblem {
+                message = "That take didn't start. The camera said \u{201C}\(problem)\u{201D}. Try again."
+            } else {
+                message = "That take didn't save. Try again."
+            }
             return
         }
         let takeMarks = marks
