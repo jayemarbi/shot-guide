@@ -1,0 +1,50 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">{"imports":{"three":"./lib/three/build/three.module.js","three/addons/":"./lib/three/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+const W = 1080, H = 1920;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H); renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.0;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#f2a065');
+const camera = new THREE.PerspectiveCamera(35, W / H, 0.1, 5000);
+camera.position.set(0, 1.2, 5.5); camera.lookAt(0, 0.95, 0);
+const hemi = new THREE.HemisphereLight('#9fb8ff', '#7a4a30', 0.9); scene.add(hemi);
+const sun = new THREE.DirectionalLight('#ffd0a0', 3.0); sun.position.set(-4, 3, -6); sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024); sun.shadow.camera.left = -3; sun.shadow.camera.right = 3; sun.shadow.camera.top = 3; sun.shadow.camera.bottom = -3;
+scene.add(sun);
+const fill = new THREE.DirectionalLight('#ffe6cc', 0.6); fill.position.set(3, 2, 5); scene.add(fill);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshStandardMaterial({ color: '#a0583a', roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+let mixer, action;
+new GLTFLoader().load('assets/Michelle.glb', (g) => {
+  const model = g.scene; window.g_model = model;
+  model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  scene.add(model);
+  mixer = new THREE.AnimationMixer(model);
+  action = mixer.clipAction(g.animations.find(a => a.name === 'SambaDance'));
+  action.play();
+  window.ready = true;
+});
+window.probe = () => {
+  const hips = []; let h; window.g_model.traverse(o => { if (!h && /Hips$/.test(o.name)) h = o; });
+  const out = []; const q = new THREE.Quaternion(); const p = new THREE.Vector3(); const f = new THREE.Vector3();
+  for (let t = 0; t <= 18.2; t += 0.05) { mixer.setTime(t); window.g_model.updateMatrixWorld(true); h.getWorldPosition(p); h.getWorldQuaternion(q); f.set(0,0,1).applyQuaternion(q); out.push([+t.toFixed(2), +(Math.atan2(f.x, f.z)*57.3).toFixed(0), +p.x.toFixed(2), +p.z.toFixed(2), +p.y.toFixed(2)]); }
+  return out;
+};
+window.renderAt = (t) => {
+  const t0 = performance.now();
+  mixer.setTime(t);
+  renderer.render(scene, camera);
+  renderer.getContext().finish();
+  return performance.now() - t0;
+};
+</script>
+</body></html>

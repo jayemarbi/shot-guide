@@ -1,0 +1,224 @@
+{
+ "title": "Your 28 saved reels, sorted into formats",
+ "subtitle": "Frames from the reels themselves. 23 of the 28 were filmed horizontally; only the 5 talking guides are vertical.",
+ "rows": [
+  {
+   "name": "Mood loop  (6 reels)",
+   "line": "8-18 s of music and views, a one-line caption. You small in something huge, often at golden hour.",
+   "frames": [
+    [
+     "R03",
+     2.5,
+     {
+      "label": "kdmfilms_ (62.6K reposts)"
+     }
+    ],
+    [
+     "R03",
+     6.2,
+     {
+      "label": "kdmfilms_"
+     }
+    ],
+    [
+     "R01",
+     2.7,
+     {
+      "label": "ayitsphotography"
+     }
+    ],
+    [
+     "R01",
+     8.3,
+     {
+      "label": "ayitsphotography"
+     }
+    ],
+    [
+     "R27",
+     9.4,
+     {
+      "rot": 90,
+      "box": [
+       0.02,
+       0.13,
+       0.84,
+       0.7
+      ],
+      "label": "cliroam (filmed sideways)"
+     }
+    ]
+   ]
+  },
+  {
+   "name": "Place film  (6 reels)",
+   "line": "A title card names the place, then 10-30 quick shots of it. Most start and end on the same shot so it loops.",
+   "frames": [
+    [
+     "R08",
+     4.5,
+     {
+      "label": "zackroams"
+     }
+    ],
+    [
+     "R09",
+     2.9,
+     {
+      "label": "bros_onthemove"
+     }
+    ],
+    [
+     "R18",
+     3.5,
+     {
+      "label": "nikibsen (10.9K)"
+     }
+    ],
+    [
+     "R04",
+     6.0,
+     {
+      "label": "scoobafiles"
+     }
+    ],
+    [
+     "R12",
+     2.8,
+     {
+      "label": "ciancinematic_"
+     }
+    ]
+   ]
+  },
+  {
+   "name": "A line or a story does the hooking  (5 reels)",
+   "line": "A relatable line, a bed-to-the-Alps daydream, a list of trips with prices, a game overlay.",
+   "frames": [
+    [
+     "R14",
+     4.8,
+     {
+      "label": "peyton.sharkey"
+     }
+    ],
+    [
+     "R07",
+     2.2,
+     {
+      "label": "framesbycorradini"
+     }
+    ],
+    [
+     "R20",
+     4.1,
+     {
+      "label": "masonmeanders (42.7K)"
+     }
+    ],
+    [
+     "R20",
+     16.0,
+     {
+      "label": "...then the Alps"
+     }
+    ],
+    [
+     "R24",
+     4.1,
+     {
+      "box": [
+       0.0,
+       0.215,
+       0.86,
+       0.71
+      ],
+      "label": "trips with prices"
+     }
+    ]
+   ]
+  },
+  {
+   "name": "Guide  (5 reels)",
+   "line": "Vertical, voice with word-by-word captions, real info: cost, distance, how to get there. 'Save for later'.",
+   "frames": [
+    [
+     "R22",
+     23.7,
+     {
+      "label": "Iceland costs"
+     }
+    ],
+    [
+     "R22",
+     41.1,
+     {
+      "label": "total card"
+     }
+    ],
+    [
+     "R23",
+     12.2,
+     {
+      "label": "Azores"
+     }
+    ],
+    [
+     "R26",
+     1.3,
+     {
+      "label": "Canoe Creek hike"
+     }
+    ],
+    [
+     "R28",
+     0.4,
+     {
+      "label": "Binna Burra"
+     }
+    ]
+   ]
+  },
+  {
+   "name": "One idea carries it  (4 reels)",
+   "line": "Same pose in front of many mountains, one walk across many skies, a film scene recreated.",
+   "frames": [
+    [
+     "R10",
+     3.32,
+     {
+      "label": "roamwithfik"
+     }
+    ],
+    [
+     "R10",
+     4.52,
+     {
+      "label": "same pose, next mountain"
+     }
+    ],
+    [
+     "R11",
+     4.1,
+     {
+      "label": "thib.adventure"
+     }
+    ],
+    [
+     "R11",
+     5.3,
+     {
+      "label": "same walk, new sky"
+     }
+    ],
+    [
+     "R21",
+     4.8,
+     {
+      "label": "eeriiiic: Jack Sparrow"
+     }
+    ]
+   ]
+  }
+ ]
+}

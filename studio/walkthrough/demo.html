@@ -1,0 +1,848 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shot Guide 1.7 walkthrough</title>
+<style>
+:root{--O:#FF9F0A;--G:#30D158;--sec:rgba(235,235,245,.6);--ter:rgba(235,235,245,.3);--sep:rgba(84,84,88,.65);--cell:#1C1C1E;--cell2:#2C2C2E}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1080px;height:1920px;overflow:hidden;background:#0a0a0b}
+body{font-family:'Inter',sans-serif;color:#fff;-webkit-font-smoothing:antialiased;position:relative;font-feature-settings:'cv11' 0}
+#stage{position:absolute;inset:0;background:radial-gradient(1100px 620px at 50% -60px,#2a2013 0%,#120f0b 45%,#0a0a0b 75%)}
+#cap{position:absolute;left:0;top:0;width:1080px;height:296px}
+.capblock{position:absolute;left:64px;top:46px;width:952px}
+.pill{display:inline-block;background:var(--O);color:#000;font-weight:700;font-size:25px;letter-spacing:.07em;padding:6px 16px 5px;border-radius:999px}
+.ctitle{font-family:'Inter Display','Inter';font-weight:700;font-size:54px;letter-spacing:-1.1px;margin-top:16px;line-height:1.08}
+.cbody{font-size:33px;line-height:1.3;color:rgba(255,255,255,.8);margin-top:12px;letter-spacing:-.25px}
+#sped{position:absolute;right:164px;top:246px;background:rgba(255,255,255,.12);color:#fff;font-weight:600;font-size:24px;padding:6px 16px;border-radius:999px;opacity:0;display:flex;gap:10px;align-items:center}
+#phone{position:absolute;left:164px;top:300px;width:752px;height:1596px;border-radius:115px;background:#1b1b1e;box-shadow:inset 0 0 0 2px #3c3c41,inset 0 0 0 9px #111113,0 40px 90px rgba(0,0,0,.65)}
+#wrap{position:absolute;left:14px;top:14px;width:724px;height:1568px;border-radius:101px;overflow:hidden;background:#000}
+#screen{position:absolute;left:0;top:0;width:393px;height:852px;transform:scale(1.8422);transform-origin:0 0;overflow:hidden;background:#000}
+#enddim{position:absolute;left:164px;top:300px;width:752px;height:1596px;border-radius:115px;background:#0a0a0b;opacity:0}
+#endcard{position:absolute;left:120px;top:560px;width:840px;opacity:0;background:#202023;border-radius:44px;padding:56px 60px 50px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+#endcard h2{font-family:'Inter Display','Inter';font-size:44px;letter-spacing:-.8px;margin-bottom:30px}
+.erow{display:flex;gap:26px;align-items:center;padding:20px 0;border-top:1px solid rgba(255,255,255,.1)}
+.erow .et{font-size:36px;font-weight:600;letter-spacing:-.4px}
+.erow .es{font-size:28px;color:rgba(255,255,255,.6);margin-top:4px}
+#fade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none}
+
+/* ---------- inside the phone (iOS points) ---------- */
+.layer{position:absolute;left:0;top:0;width:393px;height:852px;overflow:hidden;background:#000;transform-origin:50% 0}
+.layer.sheetL{background:transparent;overflow:visible}
+.dim{position:absolute;inset:0;background:#000;opacity:0;z-index:40;pointer-events:none}
+.scroller{position:absolute;left:0;top:0;width:393px}
+.content{position:relative;padding-top:98px;padding-bottom:60px}
+.navbar{position:absolute;left:0;top:0;width:393px;height:98px;z-index:20}
+.navbg{position:absolute;inset:0;background:rgba(24,24,26,.93);-webkit-backdrop-filter:blur(22px) saturate(160%);backdrop-filter:blur(22px) saturate(160%);border-bottom:.5px solid var(--sep);opacity:0}
+.navrow{position:absolute;left:0;top:54px;width:393px;height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 8px;color:var(--O)}
+.navtitle{position:absolute;left:80px;right:80px;top:54px;height:44px;line-height:44px;text-align:center;font-weight:600;font-size:17px;letter-spacing:-.4px;opacity:0;color:#fff}
+.back{display:flex;align-items:center;gap:3px;font-size:17px;letter-spacing:-.4px}
+.largetitle{font-family:'Inter Display','Inter';font-weight:700;font-size:34px;letter-spacing:-.9px;padding:3px 16px 6px;line-height:41px}
+.section{margin:0 16px}
+.sh{font-size:13px;color:var(--sec);text-transform:uppercase;letter-spacing:.1px;padding:22px 16px 7px}
+.sf{font-size:13px;color:var(--sec);padding:7px 16px 0;line-height:17px;letter-spacing:-.05px}
+.sf.box{border-radius:10px;padding:7px 16px 8px;margin-top:2px}
+.group{background:var(--cell);border-radius:12px;overflow:hidden}
+.sheetL .group{background:var(--cell2)}
+.row{position:relative;display:flex;align-items:center;min-height:44px;padding:9px 16px;gap:12px}
+.row+.row::before{content:'';position:absolute;top:0;right:0;left:var(--inset,16px);height:.5px;background:var(--sep)}
+.row.col{flex-direction:column;align-items:flex-start;gap:3px;padding:10px 16px}
+.ibox{width:28px;display:flex;justify-content:center;flex:none}
+.grow{flex:1;min-width:0}
+.t17{font-size:17px;letter-spacing:-.4px;line-height:22px}
+.t17b{font-size:17px;font-weight:600;letter-spacing:-.4px;line-height:22px}
+.t15{font-size:15px;letter-spacing:-.25px;line-height:20px}
+.t15b{font-size:15px;font-weight:600;letter-spacing:-.25px;line-height:20px}
+.t13{font-size:13px;letter-spacing:-.05px;line-height:17px}
+.cap{font-size:12px;line-height:16px}
+.sec{color:var(--sec)}
+.ter{color:var(--ter)}
+.tnum{font-variant-numeric:tabular-nums}
+.flexrow{display:flex;justify-content:space-between;align-items:center}
+.chips{display:flex;gap:8px;padding:2px 16px 6px}
+.dchip{display:inline-flex;align-items:center;gap:4px;padding:7px 13px;border-radius:999px;background:rgba(255,255,255,.1);font-size:15px;font-weight:600;letter-spacing:-.2px}
+.dchip.on{background:var(--O);color:#000}
+.dchip.add{background:rgba(255,159,10,.17);color:var(--O)}
+/* status bar */
+#status{position:absolute;left:0;top:0;width:393px;height:54px;z-index:80;pointer-events:none}
+#st-time{position:absolute;left:0;width:118px;top:17px;text-align:center;font-weight:600;font-size:17px;letter-spacing:-.3px}
+#st-icons{position:absolute;right:26px;top:19px;display:flex;gap:6px;align-items:center}
+#island{position:absolute;left:134px;top:11px;width:125px;height:37px;border-radius:19px;background:#000;z-index:90}
+#home{position:absolute;left:129px;bottom:8px;width:135px;height:5px;border-radius:3px;background:#fff;z-index:85;opacity:.92}
+/* sheets */
+.card{position:absolute;left:0;top:62px;width:393px;height:790px;background:var(--cell);border-radius:14px 14px 0 0;overflow:hidden}
+.snav{position:absolute;left:0;top:0;width:393px;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:10;background:var(--cell)}
+.snav .stitle{position:absolute;left:90px;right:90px;text-align:center;font-weight:600;font-size:17px;letter-spacing:-.4px}
+.sbtn{font-size:17px;letter-spacing:-.4px;color:var(--O);min-width:40px}
+.sbtn.b{font-weight:600;text-align:right}
+.card .content{padding-top:56px;padding-bottom:40px}
+/* review */
+.rv{padding:16px 16px 40px}
+.player{position:relative;width:225px;height:400px;margin:0 auto;border-radius:14px;overflow:hidden;background:#000}
+.pplay{position:absolute;left:50%;top:50%;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;background:rgba(0,0,0,.42);display:flex;align-items:center;justify-content:center;padding-left:4px}
+.ptime{position:absolute;bottom:10px;left:12px;font-size:12px;font-weight:600;color:rgba(255,255,255,.92);font-variant-numeric:tabular-nums}
+.ptime.r{left:auto;right:12px}
+.pline{position:absolute;bottom:16px;left:48px;right:48px;height:3px;border-radius:2px;background:rgba(255,255,255,.35)}
+.block{margin:16px -8px 0;padding:8px;border-radius:12px}
+.field{margin-top:7px;padding:10px;border-radius:10px;background:rgba(255,255,255,.07);font-size:17px;letter-spacing:-.4px;min-height:42px;display:flex;align-items:center}
+.caret{display:inline-block;width:2px;height:21px;background:var(--O);margin:0 1px;flex:none}
+.chiprow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.chip{display:inline-flex;align-items:center;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.1);font-size:15px;letter-spacing:-.2px}
+.chip.on{background:var(--O);color:#000}
+.switch{width:51px;height:31px;border-radius:16px;background:#39393D;position:relative;flex:none}
+.switch i{position:absolute;left:2px;top:2px;width:27px;height:27px;border-radius:50%;background:#fff}
+.tagchip{display:inline-flex;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.1);font-size:15px;margin:0 6px 8px 0}
+.tagchip.on{background:var(--O);color:#000}
+/* camera */
+.cam{background:#000}
+#cam-scene{position:absolute;inset:0}
+#cam-ui{position:absolute;inset:0;color:#fff}
+.ctop{position:absolute;left:16px;right:16px;top:58px;display:flex;align-items:flex-start;gap:8px}
+.cbtn{width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
+.cinfo{background:rgba(0,0,0,.5);border-radius:12px;padding:10px;text-align:right}
+.lenses{position:absolute;left:0;right:0;top:122px;display:flex;justify-content:center;gap:8px}
+.lens{padding:6px 14px;border-radius:999px;background:rgba(0,0,0,.5);font-size:15px;font-weight:600}
+.lens.on{background:var(--O);color:#000}
+.ccenter{position:absolute;left:20px;right:20px;top:300px;height:260px;display:flex;align-items:center;justify-content:center}
+.prompt{width:100%;background:rgba(0,0,0,.5);border-radius:18px;padding:20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
+.prompt .px{font-size:28px;font-weight:700;letter-spacing:-.6px;line-height:33px}
+.prompt .pn{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.pbar{width:220px;height:4px;border-radius:2px;background:rgba(255,255,255,.3);overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--O)}
+.prompt .pnext{font-size:13px;color:rgba(255,255,255,.75)}
+.notice{background:rgba(0,0,0,.6);border-radius:14px;padding:16px;font-size:17px;font-weight:600;letter-spacing:-.4px;text-align:center;display:flex;gap:10px;align-items:center;max-width:300px;line-height:22px}
+.cbottom{position:absolute;left:16px;right:16px;bottom:58px;display:flex;flex-direction:column;align-items:center;gap:14px}
+.before{background:rgba(0,0,0,.5);border-radius:12px;padding:10px;font-size:15px;letter-spacing:-.25px;text-align:center}
+.crow{width:100%;display:flex;align-items:center;justify-content:space-between}
+.slot{width:120px;height:44px;display:flex;align-items:center}
+.slot.r{justify-content:flex-end}
+.rec{width:80px;height:80px;border-radius:50%;box-shadow:inset 0 0 0 4px #fff;display:flex;align-items:center;justify-content:center}
+.rec i{width:64px;height:64px;border-radius:50%;background:#FF3B30;display:block}
+.rec i.sq{width:32px;height:32px;border-radius:6px}
+.timing{background:rgba(0,0,0,.5);border-radius:12px;padding:6px 10px;font-size:11px;font-weight:600;line-height:14px;white-space:nowrap}
+.markbtn{display:inline-flex;gap:6px;align-items:center;background:rgba(255,214,10,.85);color:#000;font-weight:600;font-size:15px;padding:8px 14px;border-radius:999px}
+#tap{position:absolute;left:0;top:0;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(255,255,255,.32);box-shadow:0 0 0 2px rgba(255,255,255,.8),0 0 12px rgba(0,0,0,.35);z-index:100;opacity:0;pointer-events:none}
+#scrdip{position:absolute;inset:0;background:#000;opacity:0;z-index:95;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="cap"><div class="capblock" id="capB"></div><div class="capblock" id="capA"></div></div>
+  <div id="sped"><svg width="26" height="26" viewBox="0 0 24 24" fill="#fff"><path d="M3 5.5v13l8.5-6.5zM12.5 5.5v13L21 12z"/></svg>Sped up</div>
+  <div id="phone"><div id="wrap"><div id="screen"></div></div></div>
+  <div id="enddim"></div>
+  <div id="endcard"></div>
+  <div id="fade"></div>
+</div>
+<script>
+'use strict';
+// ---------- helpers ----------
+const SCALE = 1.8422;
+const O = '#FF9F0A', G = '#30D158', SEC = 'rgba(235,235,245,.6)', TER = 'rgba(235,235,245,.3)';
+const $ = (s, r = document) => r.querySelector(s);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, p) => a + (b - a) * p;
+const easeOut = p => 1 - Math.pow(1 - p, 3);
+const easeIn = p => p * p * p;
+const easeInOut = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const springy = p => 1 - Math.pow(1 - p, 3.6);
+const linear = p => p;
+function prog(t, t0, d, e = easeOut) { return e(clamp((t - t0) / d)); }
+function present(t, tin, tout, d = 0.5) {
+  const up = prog(t, tin, d, springy);
+  const down = tout === undefined ? 0 : prog(t, tout, 0.42, easeIn);
+  return up * (1 - down);
+}
+function pulse(t, t0, t1) {
+  if (t < t0 || t > t1 + 0.35) return 0;
+  const a = clamp((t - t0) / 0.3), b = 1 - clamp((t - t1) / 0.35);
+  return Math.min(a, b) * (0.78 + 0.22 * Math.sin((t - t0) * 6));
+}
+function typed(s, t, t0, cps = 11) { if (t < t0) return ''; return s.slice(0, Math.min(s.length, Math.floor((t - t0) * cps) + 1)); }
+const caretOn = t => Math.floor(t * 2.4) % 2 === 0;
+const brk = s => s.replace(/_/g, '_​');
+const slug = s => s.trim().replace(/\s+/g, '-');
+const pad2 = n => String(n).padStart(2, '0');
+function rnd(seed) { let s = seed * 9301 + 49297; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; }
+
+// ---------- icons (24x24) ----------
+const ICON = {
+  person: '<circle cx="12" cy="7.4" r="4.1"/><path d="M3.8 20.3c0-4.3 3.7-7.2 8.2-7.2s8.2 2.9 8.2 7.2c0 .7-.5 1.2-1.2 1.2H5c-.7 0-1.2-.5-1.2-1.2z"/>',
+  hand: '<path d="M7.2 12.2V5.6a1.35 1.35 0 0 1 2.7 0v5.2h.6V3.9a1.35 1.35 0 0 1 2.7 0v6.9h.6V4.7a1.35 1.35 0 0 1 2.7 0v6.6h.6V7.4a1.3 1.3 0 0 1 2.6 0v7.1c0 4.3-2.9 7.6-7.2 7.6-2.6 0-4.5-1.1-5.9-3.2l-3.1-4.6a1.4 1.4 0 0 1 2.2-1.7z"/>',
+  sun: '<path d="M12 9.2a6 6 0 0 1 6 6H6a6 6 0 0 1 6-6z"/><rect x="2.5" y="16.6" width="19" height="1.9" rx=".95"/><path d="M12 3.2v3M5.1 6.6l2 2M18.9 6.6l-2 2M2.8 12.8h2.6M18.6 12.8h2.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/>',
+  checkc: '<circle cx="12" cy="12" r="10"/><path d="M7.4 12.4l3.1 3 6-6.3" fill="none" stroke="#1C1C1E" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>',
+  check: '<path d="M5 12.6l4.4 4.4L19.2 6.8" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  sparkles: '<path d="M10 2.6l1.7 5 5 1.7-5 1.7-1.7 5-1.7-5-5-1.7 5-1.7z"/><path d="M18.2 13.2l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z"/>',
+  plus: '<path d="M12 4.3v15.4M4.3 12h15.4" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" fill="none"/>',
+  share: '<path d="M12 2.8v11.4M8 6.6l4-3.8 4 3.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.6 9.6H6.9A1.9 1.9 0 0 0 5 11.5v7.8a1.9 1.9 0 0 0 1.9 1.9h10.2a1.9 1.9 0 0 0 1.9-1.9v-7.8a1.9 1.9 0 0 0-1.9-1.9h-1.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  back: '<path d="M15.5 4L7.5 12l8 8" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  chev: '<path d="M9 5.5l6.5 6.5L9 18.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  updown: '<path d="M7.5 9.5L12 5l4.5 4.5M7.5 14.5L12 19l4.5-4.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/>',
+  grid: '<rect x="3.5" y="3.5" width="17" height="17" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17" stroke="currentColor" stroke-width="1.5"/>',
+  timer: '<circle cx="12" cy="13.2" r="7.8" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 13.2V8.8M9.4 2.6h5.2" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
+  star: '<path d="M12 2.6l2.85 5.85 6.4.9-4.65 4.5 1.1 6.4L12 17.2l-5.7 3.05 1.1-6.4L2.75 9.35l6.4-.9z"/>',
+  photo: '<rect x="2.6" y="6.4" width="15.4" height="13.4" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M6.6 3.6h11.2a3 3 0 0 1 3 3v9.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M4.4 17.6l4.2-4.4 3.1 3.1 2.1-2.1 3 3.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>',
+  clip: '<rect x="4.6" y="4.2" width="14.8" height="17.4" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.9"/><rect x="8.6" y="2.4" width="6.8" height="3.8" rx="1.3"/><circle cx="8.3" cy="11" r="1"/><circle cx="8.3" cy="15.2" r="1"/><path d="M10.8 11h5M10.8 15.2h5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+  hourglass: '<path d="M6.5 2.8h11M6.5 21.2h11" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/><path d="M7.8 3.2c0 4.2 4.2 5.6 4.2 8.8s-4.2 4.6-4.2 8.8M16.2 3.2c0 4.2-4.2 5.6-4.2 8.8s4.2 4.6 4.2 8.8" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M9.3 20.1c.9-2.2 2.7-3.2 2.7-3.2s1.8 1 2.7 3.2z"/>',
+  loc: '<path d="M21 3L3.4 10.4l7.7 2.5 2.5 7.7z"/>',
+  play: '<path d="M7.5 4.8v14.4L19.2 12z"/>',
+  mountain: '<path d="M2.2 20L9 7.6l3.7 6 2.6-3.6L22 20z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M7.2 10.9l1.8 1.3 1.6-1.1" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>',
+  falls: '<path d="M3.2 4.4h17.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 4.4v9.6M12 4.4v11.8M16 4.4v9.6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3.4 19.6c2-1.7 4.1-1.7 6.1 0s4.1 1.7 6.1 0 3.5-1.3 5-.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  waves: '<circle cx="17.5" cy="5.6" r="2.6"/><path d="M2.4 13.6c2.4-2 4.8-2 7.2 0s4.8 2 7.2 0 3.6-1.7 4.8-.9M2.4 19.2c2.4-2 4.8-2 7.2 0s4.8 2 7.2 0 3.6-1.7 4.8-.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  building: '<rect x="3.6" y="3.2" width="9.6" height="17.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M13.2 8.8h6a1.2 1.2 0 0 1 1.2 1.2v10.8h-7.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M6.8 6.8h3.2M6.8 10.4h3.2M6.8 14h3.2M16 12.4h1.6M16 16h1.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+  car: '<path d="M4.4 12.2l1.9-5.1a2.1 2.1 0 0 1 2-1.4h7.4a2.1 2.1 0 0 1 2 1.4l1.9 5.1" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><rect x="2.8" y="11.8" width="18.4" height="5.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="7.3" cy="14.7" r="1.3"/><circle cx="16.7" cy="14.7" r="1.3"/><path d="M5.6 17.8v2.2M18.4 17.8v2.2" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
+  snow: '<path d="M12 2.4v19.2M3.7 7.2l16.6 9.6M3.7 16.8l16.6-9.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M9.3 3.8L12 6.5l2.7-2.7M9.3 20.2L12 17.5l2.7 2.7M3.2 10.4l3.7-1 -1-3.7M20.8 13.6l-3.7 1 1 3.7M5.9 18.3l1-3.7-3.7-1M18.1 5.7l-1 3.7 3.7 1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  compass: '<circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M15.9 8.1l-2.3 5.5-5.5 2.3 2.3-5.5z"/>',
+  signal: '<rect x="1" y="15" width="3.6" height="5" rx="1"/><rect x="6.2" y="11.6" width="3.6" height="8.4" rx="1"/><rect x="11.4" y="8.2" width="3.6" height="11.8" rx="1"/><rect x="16.6" y="4.8" width="3.6" height="15.2" rx="1"/>',
+  wifi: '<path d="M12 19.6l2.6-3.1a3.9 3.9 0 0 0-5.2 0z"/><path d="M5.6 12.4a9.2 9.2 0 0 1 12.8 0M2.4 8.9a14 14 0 0 1 19.2 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M8.6 15.4a5.2 5.2 0 0 1 6.8 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>'
+};
+function ic(name, size = 22, color = 'currentColor', style = '') {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor" style="color:${color};flex:none;${style}">${ICON[name]}</svg>`;
+}
+const chev = () => ic('chev', 14, 'rgba(235,235,245,.3)');
+const ibox = (name, color = O, size = 22) => `<div class="ibox">${ic(name, size, color)}</div>`;
+
+// ---------- the shot list (from the app) ----------
+const SHOTS = {
+  ONTHEWAY: { t: 'ON THE WAY', g: 'hand', n: 3, c: false, s: 'The trip there: windows, roads, boats' },
+  TRANSITION: { t: 'TRANSITION', g: 'hand', c: true },
+  WHIP: { t: 'WHIP', g: 'hand', c: false },
+  BODYWIPE: { t: 'BODY WIPE', g: 'person', c: false },
+  POV: { t: 'POV', g: 'hand', n: 1, c: true, s: 'What your eyes see on the way' },
+  FOLLOW: { t: 'FOLLOW', g: 'hand', n: 2, c: false, s: 'Being led by the hand towards the view' },
+  REACTION: { t: 'REACTION', g: 'person', n: 1, c: true, s: 'Your first look at the view' },
+  REVEAL: { t: 'REVEAL', g: 'hand', n: 2, c: true, s: 'The view opens up' },
+  AMBIENT: { t: 'AMBIENT', g: 'hand', n: 1, c: true, s: '20 seconds of pure sound' },
+  DETAIL: { t: 'DETAIL', g: 'hand', n: 3, c: true, s: 'Close-ups and textures' },
+  FOOD: { t: 'FOOD', g: 'hand', n: 2, c: false, s: 'Local food, close and slow' },
+  WIDE: { t: 'WIDE', g: 'hand', n: 2, c: true, s: 'The whole place and its scale' },
+  SLOMO: { t: 'SLOMO', g: 'hand', n: 1, c: true, s: 'Water, waves or a jump in slow motion' },
+  TALK: { t: 'TALK', g: 'person', n: 3, c: true, s: 'One line to camera' },
+  WALKAWAY: { t: 'WALKAWAY', g: 'person', n: 2, c: true, s: 'You walk into the scene' },
+  TELE: { t: 'TELE', g: 'person', n: 1, c: true, s: 'You, small, under something huge' },
+  SECONDANGLE: { t: 'SECOND ANGLE', g: 'person', n: 1, c: true, s: 'You getting the hero shot' },
+  MOMENT: { t: 'MOMENT', g: 'person', n: 2, c: true, s: 'A real moment together, filmed from the tripod' },
+  TIMELAPSE: { t: 'TIMELAPSE', g: 'person', n: 1, c: true, s: 'Clouds, light or crowds, sped up' },
+  VOICEOVER: { t: 'VOICEOVER', g: 'hand', n: 1, c: false, s: 'Your voice, for narration and captions' }
+};
+const HALF = {
+  'TRANSITION-0': 'Cover the lens with your hand to end this place', 'TRANSITION-1': 'Pull your hand off the lens to start here',
+  'BODYWIPE-0': 'Walk across the lens to end this place', 'BODYWIPE-1': 'Step away from the lens to start here',
+  'WHIP-0': 'Whip away from the view to end this place', 'WHIP-1': 'Whip in and land on the view to start here'
+};
+const PHASES = [
+  { id: 'ontheway', title: 'On the way', foot: 'The trip there.', slots: [['ONTHEWAY']] },
+  { id: 'arriving', title: 'Arriving', foot: 'As you get there. The In halves start this place in an edit.', slots: [['TRANSITION', 1], ['WHIP', 1], ['BODYWIPE', 1], ['POV'], ['FOLLOW']] },
+  { id: 'firstlook', title: 'First look', foot: "Your first two minutes. Film REACTION before you've seen the view.", slots: [['REACTION'], ['REVEAL']] },
+  { id: 'atspot', title: 'At the spot', foot: 'Easiest first, down to the ones worth taking your time over. TIMELAPSE ties up the phone, so save it for when you sit down for a while, like waiting for sunset.', slots: [['AMBIENT'], ['DETAIL'], ['FOOD'], ['WIDE'], ['SLOMO'], ['TALK'], ['WALKAWAY'], ['TELE'], ['SECONDANGLE'], ['MOMENT'], ['TIMELAPSE']] },
+  { id: 'leaving', title: 'Leaving', foot: "As you go. The Out halves end this place in an edit, and VOICEOVER is best somewhere quiet, like the car. Shots marked extra are for when the day allows, so they don't count towards the total.", slots: [['TRANSITION', 0], ['WHIP', 0], ['BODYWIPE', 0], ['VOICEOVER']], facts: true }
+];
+const TYPES = [
+  { id: 'mountain', title: 'Mountain and hiking', sub: 'The trail, the summit, the big view', icon: 'mountain' },
+  { id: 'falls', title: 'Waterfalls and rainforest', sub: 'Moving water, ferns and moss, the sound of the falls', icon: 'falls' },
+  { id: 'beach', title: 'Beach and coast', sub: 'Waves, sand, cliffs, sunrise and sunset', icon: 'waves' },
+  { id: 'city', title: 'City', sub: 'Streets, food, crowds and lights', icon: 'building' },
+  { id: 'road', title: 'Road trip', sub: 'The drive and the stops along the way', icon: 'car' },
+  { id: 'snow', title: 'Snow', sub: 'Filmed a little brighter, so snow stays white', icon: 'snow' },
+  { id: 'general', title: 'General', sub: 'The standard shot list, for anything else', icon: 'compass' }
+];
+const TYPE = Object.fromEntries(TYPES.map(t => [t.id, t]));
+const TUNE = {
+  falls: {
+    ONTHEWAY: { s: 'The drive up: winding roads, rainforest out the window' },
+    POV: { s: 'The track in: ferns, roots, the first sound of water' },
+    REVEAL: { s: 'The falls open up through the trees' },
+    AMBIENT: { n: 2, s: '20 seconds of the falls, nothing else' },
+    DETAIL: { n: 4, s: 'Moss, ferns, drops on leaves' },
+    WIDE: { s: 'The whole falls, top to pool' },
+    SLOMO: { n: 3, s: 'Water hitting the pool, at 120 fps' },
+    TELE: { s: 'You, small, at the foot of the falls' },
+    TIMELAPSE: { s: 'Mist and light moving through the falls' }
+  },
+  city: {
+    ONTHEWAY: { s: 'Trains, trams and the drive in' },
+    POV: { s: 'Walking the streets at eye level' },
+    FOLLOW: { c: true, s: 'Led by the hand through the crowd' },
+    REVEAL: { s: 'Round a corner onto the skyline' },
+    AMBIENT: { s: '20 seconds of street sound' },
+    DETAIL: { s: 'Signs, coffee, neon, textures' },
+    FOOD: { c: true, n: 3, s: 'Street food and cafes, close and slow' },
+    WIDE: { s: 'The skyline or the street, and its scale' },
+    SLOMO: { s: 'A crowd crossing, pigeons, a splash' },
+    TELE: { s: 'You, small, under the towers' },
+    TIMELAPSE: { n: 2, s: 'Traffic or crowds at blue hour' }
+  },
+  general: {}
+};
+function slotInfo(key, half, type) {
+  const b = SHOTS[key], tu = (TUNE[type] || {})[key] || {};
+  const counts = tu.c !== undefined ? tu.c : b.c;
+  const isHalf = half !== undefined;
+  return {
+    id: key + (isHalf ? '-' + half : ''), key, half,
+    title: b.t + (isHalf ? (half === 1 ? ' · IN' : ' · OUT') : ''),
+    sum: isHalf ? HALF[key + '-' + half] : (tu.s || b.s),
+    n: isHalf ? 1 : (tu.n || b.n), counts, g: b.g
+  };
+}
+const DAYS = {
+  1: { n: 1, label: 'Day 1 · Sat 14 Nov', place: 'Springbrook', code: 'Springbrook', date: '2026-11-14', region: 'Springbrook · Queensland, Australia', type: 'falls', light: 'Golden hour starts at 5:44 pm, sunset at 6:16 pm' },
+  2: { n: 2, label: 'Day 2 · Sun 15 Nov', place: 'Surfers Paradise', code: 'SurfersParadise', date: '2026-11-15', region: 'Surfers Paradise · Queensland, Australia', type: 'city', light: 'Golden hour starts at 5:47 pm, sunset at 6:18 pm' }
+};
+const CL1 = { id: 'c1', day: 1, shot: 'WIDE', take: 1, name: 'Lower Falls', tags: 'waterfall, rainforest', dur: 14 };
+const CL2 = { id: 'c2', day: 1, shot: 'DETAIL', take: 1, name: 'Lower Falls', tags: 'rainforest, rocks', dur: 8 };
+const CL2r = Object.assign({}, CL2, { name: 'Lower Falls ferns' });
+const CL3 = { id: 'c3', day: 1, shot: 'WIDE', take: 2, name: 'Twin Falls', tags: 'waterfall, rainforest', dur: 14 };
+
+// ---------- the scenes inside the camera ----------
+function frond(r, x, y, len, ang, curve, sc, col) {
+  const ex = x + Math.cos(ang) * len, ey = y + Math.sin(ang) * len;
+  const nx = Math.cos(ang + Math.PI / 2), ny = Math.sin(ang + Math.PI / 2);
+  const cx = (x + ex) / 2 + nx * curve, cy = (y + ey) / 2 + ny * curve;
+  const f = v => v.toFixed(1);
+  let o = `<path d="M${f(x)},${f(y)} Q${f(cx)},${f(cy)} ${f(ex)},${f(ey)}" stroke="${col}" stroke-width="${f(2.4 * sc)}" fill="none"/>`;
+  const N = 16;
+  for (let i = 1; i < N; i++) {
+    const u = i / N, a1 = 1 - u;
+    const px = a1 * a1 * x + 2 * a1 * u * cx + u * u * ex, py = a1 * a1 * y + 2 * a1 * u * cy + u * u * ey;
+    const tx = 2 * a1 * (cx - x) + 2 * u * (ex - cx), ty = 2 * a1 * (cy - y) + 2 * u * (ey - cy);
+    const ta = Math.atan2(ty, tx);
+    const L = (1 - u * 0.8) * len * 0.21 * sc * (0.85 + r() * 0.3);
+    for (const side of [-1, 1]) {
+      const a = ta + side * (1.0 + r() * 0.25);
+      const lx = px + Math.cos(a) * L * 0.5, ly = py + Math.sin(a) * L * 0.5;
+      o += `<ellipse cx="${f(lx)}" cy="${f(ly)}" rx="${f(L * 0.5)}" ry="${f(L * 0.17)}" transform="rotate(${f(a * 180 / Math.PI)} ${f(lx)} ${f(ly)})" fill="${col}"/>`;
+    }
+  }
+  return o;
+}
+function strands(r, st, count, pre) {
+  let s = '';
+  for (let k = 0; k < count; k++) {
+    const u = (k + 0.5) / count - 0.5;
+    const xa = st.x0 + u * st.w0 * 0.9, xb = st.x1 + u * st.w1 * 0.92;
+    const w = 1.6 + r() * 4.2, d1 = 26 + r() * 60, d2 = 14 + r() * 34, v = 420 + r() * 300, o = r() * 300;
+    s += `<path class="strand" data-v="${v.toFixed(0)}" data-o="${o.toFixed(0)}" d="M${xa.toFixed(1)},${st.y0} C${xa.toFixed(1)},${((st.y0 + st.y1) / 2).toFixed(0)} ${xb.toFixed(1)},${st.y1 - 80} ${xb.toFixed(1)},${st.y1}" stroke="${r() < .5 ? '#ffffff' : '#d4ebf8'}" stroke-opacity="${(0.4 + r() * 0.55).toFixed(2)}" stroke-width="${w.toFixed(1)}" stroke-dasharray="${d1.toFixed(0)} ${d2.toFixed(0)}" stroke-dashoffset="${(-o).toFixed(0)}" stroke-linecap="round" fill="none"/>`;
+  }
+  return s;
+}
+function sceneSVG(kind, pre) {
+  const r = rnd(kind === 'twin' ? 7 : kind === 'detail' ? 13 : 3);
+  let s = `<svg viewBox="0 0 393 852" preserveAspectRatio="xMidYMid slice" width="100%" height="100%" style="display:block"><defs>
+  <linearGradient id="${pre}sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3efe6"/><stop offset=".14" stop-color="#8fb39a"/><stop offset=".4" stop-color="#2f5a3d"/><stop offset="1" stop-color="#10221a"/></linearGradient>
+  <linearGradient id="${pre}rock" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#626759"/><stop offset=".55" stop-color="#3a3e34"/><stop offset="1" stop-color="#23261f"/></linearGradient>
+  <linearGradient id="${pre}water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity=".96"/><stop offset=".8" stop-color="#e3f2fc" stop-opacity=".9"/><stop offset="1" stop-color="#ffffff" stop-opacity=".75"/></linearGradient>
+  <linearGradient id="${pre}pool" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a958c"/><stop offset="1" stop-color="#1b4643"/></linearGradient>
+  <radialGradient id="${pre}moss" cx=".38" cy=".3" r=".85"><stop offset="0" stop-color="#8dbb52"/><stop offset=".55" stop-color="#4f8030"/><stop offset="1" stop-color="#20401a"/></radialGradient>
+  <radialGradient id="${pre}vig" cx=".5" cy=".46" r=".8"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient>
+  <filter id="${pre}b8" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+  <filter id="${pre}b3" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5"/></filter>
+  <filter id="${pre}b14" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16"/></filter>
+  </defs>`;
+  if (kind === 'detail') {
+    s += `<rect width="393" height="852" fill="#173220"/>`;
+    s += `<g filter="url(#${pre}b14)"><ellipse cx="300" cy="140" rx="140" ry="190" fill="#d9eadf" opacity=".7"/><ellipse cx="70" cy="230" rx="110" ry="150" fill="#4f8a58" opacity=".7"/><ellipse cx="330" cy="520" rx="90" ry="140" fill="#cfe2d6" opacity=".45"/></g>`;
+    s += strands(r, { x0: 318, y0: -10, w0: 46, x1: 300, y1: 640, w1: 64 }, 9, pre);
+    s += `<path d="M-30,420 C30,330 190,320 262,392 C318,448 296,566 206,606 C118,646 -10,624 -30,560 Z" fill="url(#${pre}moss)"/>`;
+    s += `<path d="M120,640 C190,580 330,590 380,650 C420,700 400,800 330,840 C250,880 120,860 90,790 C70,740 80,680 120,640 Z" fill="url(#${pre}moss)"/>`;
+    for (let i = 0; i < 160; i++) { const x = r() * 393, y = 330 + r() * 540; s += `<circle cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" r="${(0.8 + r() * 2).toFixed(1)}" fill="${r() < .5 ? '#a9d06a' : '#2f5a22'}" opacity="${(0.4 + r() * 0.5).toFixed(2)}"/>`; }
+    for (let i = 0; i < 14; i++) { const x = 40 + r() * 320, y = 360 + r() * 440, rr = 2.5 + r() * 4.5; s += `<circle cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" r="${rr.toFixed(1)}" fill="#e8f6ff" opacity=".85"/><circle cx="${(x - rr * .3).toFixed(1)}" cy="${(y - rr * .35).toFixed(1)}" r="${(rr * .3).toFixed(1)}" fill="#fff"/>`; }
+    s += frond(r, -30, 230, 330, 0.55, 46, 1.25, '#3f7c3c') + frond(r, 420, 300, 260, Math.PI - 0.35, -40, 1.0, '#2c5c2c');
+    s += `<rect width="393" height="852" fill="url(#${pre}vig)"/></svg>`;
+    return s;
+  }
+  s += `<rect width="393" height="852" fill="url(#${pre}sky)"/>`;
+  s += `<g fill="#fff" opacity=".07"><polygon points="90,0 150,0 330,852 250,852"/><polygon points="236,0 262,0 380,720 344,720"/></g>`;
+  const canopy = ['#1f3f28', '#2a5234', '#173222', '#35633f'];
+  for (let i = 0; i < 26; i++) { const x = r() * 393, y = r() * 170 - 20, rx = 30 + r() * 60, ry = 20 + r() * 40; s += `<ellipse cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" rx="${rx.toFixed(0)}" ry="${ry.toFixed(0)}" fill="${canopy[i % 4]}" opacity="${(0.72 + r() * 0.28).toFixed(2)}"/>`; }
+  for (let i = 0; i < 14; i++) { const left = i % 2 === 0; const x = left ? r() * 70 : 323 + r() * 70, y = 120 + r() * 520; s += `<ellipse cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" rx="${(30 + r() * 40).toFixed(0)}" ry="${(40 + r() * 60).toFixed(0)}" fill="${canopy[i % 4]}" opacity=".95"/>`; }
+  if (kind === 'lower') s += `<path d="M52,178 C110,152 290,150 342,180 L370,700 L24,700 Z" fill="url(#${pre}rock)"/>`;
+  else s += `<path d="M30,232 C100,206 300,202 366,234 L384,700 L10,700 Z" fill="url(#${pre}rock)"/>`;
+  for (let i = 0; i < 10; i++) { const x = 60 + r() * 270, y = 200 + r() * 420; s += `<path d="M${x.toFixed(0)},${y.toFixed(0)} q${(r() * 30 - 15).toFixed(0)},${(30 + r() * 50).toFixed(0)} ${(r() * 20 - 10).toFixed(0)},${(70 + r() * 70).toFixed(0)}" stroke="#1d201a" stroke-width="${(1.5 + r() * 2.5).toFixed(1)}" fill="none" opacity=".55"/>`; }
+  for (let i = 0; i < 12; i++) { const x = 50 + r() * 290, y = 190 + r() * 470; s += `<ellipse cx="${x.toFixed(0)}" cy="${y.toFixed(0)}" rx="${(10 + r() * 22).toFixed(0)}" ry="${(5 + r() * 9).toFixed(0)}" fill="#47703a" opacity=".75"/>`; }
+  const streams = kind === 'lower' ? [{ x0: 197, y0: 160, w0: 58, x1: 197, y1: 668, w1: 112 }] : [{ x0: 148, y0: 216, w0: 36, x1: 140, y1: 668, w1: 72 }, { x0: 248, y0: 212, w0: 42, x1: 258, y1: 668, w1: 80 }];
+  for (const st of streams) {
+    s += `<path d="M${st.x0 - st.w0 / 2},${st.y0} C${st.x0 - st.w0 / 2 - 2},${(st.y0 + st.y1) / 2} ${st.x1 - st.w1 / 2},${st.y1 - 60} ${st.x1 - st.w1 / 2},${st.y1} L${st.x1 + st.w1 / 2},${st.y1} C${st.x1 + st.w1 / 2},${st.y1 - 60} ${st.x0 + st.w0 / 2 + 2},${(st.y0 + st.y1) / 2} ${st.x0 + st.w0 / 2},${st.y0} Z" fill="url(#${pre}water)" opacity=".9"/>`;
+    s += strands(r, st, kind === 'lower' ? 12 : 8, pre);
+    s += `<ellipse cx="${st.x0}" cy="${st.y0}" rx="${st.w0 * 0.75}" ry="6" fill="#fff" opacity=".85" filter="url(#${pre}b3)"/>`;
+  }
+  s += `<ellipse cx="196" cy="714" rx="236" ry="66" fill="url(#${pre}pool)"/>`;
+  for (let i = 0; i < 7; i++) { s += `<ellipse cx="${(196 + (r() - .5) * 170).toFixed(0)}" cy="${(700 + r() * 34).toFixed(0)}" rx="${(30 + r() * 60).toFixed(0)}" ry="${(4 + r() * 6).toFixed(0)}" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="1.5"/>`; }
+  s += `<g class="mist" filter="url(#${pre}b8)"><ellipse cx="196" cy="668" rx="132" ry="36" fill="#fff" opacity=".55"/><ellipse cx="146" cy="690" rx="92" ry="22" fill="#fff" opacity=".35"/><ellipse cx="252" cy="686" rx="92" ry="22" fill="#fff" opacity=".35"/></g>`;
+  s += `<path d="M0,742 C50,722 120,736 168,772 C185,790 190,820 196,852 L0,852 Z" fill="#1b1e18"/><path d="M393,752 C330,730 270,748 238,784 C222,805 216,830 214,852 L393,852 Z" fill="#1f221b"/>`;
+  s += frond(r, -14, 700, 214, -0.52, -40, 1, '#2f6334') + frond(r, -24, 822, 244, -0.22, -30, 1.1, '#24502a') + frond(r, 407, 716, 204, Math.PI + 0.5, 40, 1, '#2f6334') + frond(r, 416, 830, 232, Math.PI + 0.24, 30, 1.1, '#24502a') + frond(r, 26, 560, 150, -0.9, -30, .8, '#3a7440') + frond(r, 367, 556, 150, Math.PI + 0.9, 30, .8, '#3a7440');
+  s += `<rect width="393" height="852" fill="url(#${pre}vig)"/></svg>`;
+  return s;
+}
+const CAM_STEPS = {
+  WIDE: [[0, 2, 'Brace your elbows.'], [2, 10, 'Hold the frame. No panning.'], [10, 12, 'Keep holding.'], [12, 14, 'Hold still for 2 more seconds. It gives the edit room.']],
+  DETAIL: [[0, 1, 'Hold steady.'], [1, 5, 'Hold, or slide very slowly.'], [5, 6, 'Done.'], [6, 8, 'Hold still for 2 more seconds. It gives the edit room.']]
+};
+
+// ---------- screens ----------
+function tripRow(r) {
+  return `<div class="row" ${r.id ? `id="${r.id}"` : ''} style="padding:8px 16px"><div class="grow" style="display:flex;flex-direction:column;gap:3px"><div class="t17b">${r.place}</div><div class="t15 sec">${r.region}</div><div class="cap sec flexrow"><span>${r.date}</span><span>${r.count}</span></div></div>${chev()}</div>`;
+}
+function tripsHTML(st) {
+  let install;
+  if (st.warn >= 0.5) {
+    install = `<div class="row" id="tr-install" style="align-items:flex-start;padding:11px 16px;opacity:${((st.warn - 0.5) * 2).toFixed(3)}">${ibox('hourglass', O, 22)}<div class="grow"><div class="t17b" style="color:${O}">Runs out tomorrow at 9:15 pm</div><div class="t15 sec" style="margin-top:3px">Reinstall from the PC before your next trip. Your trips and clips stay.</div></div></div>`;
+  } else {
+    install = `<div class="row" id="tr-install" style="opacity:${(1 - st.warn * 2).toFixed(3)}">${ibox('hourglass', SEC, 19)}<div class="t15 sec">This install runs out Fri 20 Nov at 9:15 pm</div></div>`;
+  }
+  const rows = [];
+  if (st.spring === 'new') rows.push(tripRow({ id: 'tr-spring', place: 'Springbrook', region: 'Queensland, Australia', date: '14 November 2026', count: '0 of 27 clips' }));
+  if (st.spring === 'multi') rows.push(tripRow({ id: 'tr-spring', place: 'Springbrook', region: 'Queensland, Australia', date: '14–15 November 2026 · 2 days', count: '3 of 56 clips' }));
+  rows.push(tripRow({ place: 'Mount Barney', region: 'Queensland, Australia', date: '7 November 2026', count: '19 of 23 clips' }));
+  rows.push(tripRow({ place: 'Burleigh Heads', region: 'Queensland, Australia', date: '1 November 2026', count: '23 of 23 clips' }));
+  return `<div class="largetitle">Shot Guide</div>
+  <div class="section" style="margin-top:8px"><div class="group">${install}</div></div>
+  <div class="section" style="margin-top:22px"><div class="group">${rows.join('')}</div></div>`;
+}
+function typeRow(ty, sel, pre) {
+  return `<div class="row" id="${pre}${ty.id}" style="--inset:56px;padding:8px 16px">${ibox(ty.icon, O, 23)}<div class="grow"><div class="t17">${ty.title}</div><div class="t13 sec">${ty.sub}</div></div>${sel ? ic('check', 20, O) : '<div style="width:20px"></div>'}</div>`;
+}
+function newTripHTML(st) {
+  const placeRow = st.place ? `<div class="row"><div class="t17">${st.place}</div></div>` : `<div class="row"><div class="t17 ter">Place name, e.g. Mount Barney</div></div>`;
+  const sug = st.place ? '' : `<div class="row" id="nt-suggest"><div class="t17" style="color:${O}">Use “Springbrook”</div></div>`;
+  const code = st.place ? 'Springbrook' : 'Trip';
+  return `<div class="section"><div class="sh">Place</div><div class="group">${placeRow}${sug}</div></div>
+  <div class="section"><div class="sh">Trip type</div><div class="group">${TYPES.map(ty => typeRow(ty, st.type === ty.id, 'nt-type-')).join('')}</div>
+  <div class="sf box" id="nt-typefoot">Tunes the shot list and the tips. Staying longer? Add days as you go, from the trip page.</div></div>
+  <div class="section"><div class="sh">Where</div><div class="group">
+    <div class="row"><div class="t17 grow">Continent</div><div class="t17 sec">Oceania</div>${ic('updown', 15, SEC)}</div>
+    <div class="row"><div class="t17 grow">Country</div><div class="t17 sec">Australia</div>${chev()}</div>
+    <div class="row"><div class="t17 grow">State</div><div class="t17 sec">Queensland</div>${chev()}</div></div>
+  <div class="sf">Filled in from your location. Change anything that's wrong.</div></div>
+  <div class="section"><div class="sh">File names</div><div class="group"><div class="row"><div class="t17 ${st.place ? '' : 'ter'}">${st.place ? 'Springbrook' : 'Short name'}</div></div></div>
+  <div class="sf box" id="nt-filefoot">Clips will be named like ${brk(code + '_2026-11-14_WIDE_01_Lower-Falls.mov')}, ending with the name you give each clip.</div></div>`;
+}
+function countsFor(day, clips) {
+  const type = DAYS[day].type;
+  const dayClips = clips.filter(c => c.day === day);
+  const rows = {};
+  let done = 0, total = 0;
+  for (const ph of PHASES) for (const [k, h] of ph.slots) {
+    const si = slotInfo(k, h, type);
+    const count = h === undefined ? dayClips.filter(c => c.shot === k).length : 0;
+    rows[si.id] = { si, count };
+    if (si.counts) { total += si.n; done += Math.min(count, si.n); }
+  }
+  return { rows, done, total, dayClips };
+}
+function tripHTML(st) {
+  const day = DAYS[st.sel];
+  const { rows, done, total, dayClips } = countsFor(st.sel, st.clips);
+  const ty = TYPE[day.type];
+  const chips = [];
+  for (let d = 1; d <= st.days; d++) chips.push(`<span class="dchip ${st.sel === d ? 'on' : ''}" id="t-chip-${d}">${st.sel === d ? DAYS[d].label : 'Day ' + d}</span>`);
+  chips.push(`<span class="dchip add" id="t-chip-add">${ic('plus', 13, O)}Day ${st.days + 1}</span>`);
+  let h = `<div class="largetitle">Springbrook</div><div class="chips" id="t-chips">${chips.join('')}</div>
+  <div class="section" style="margin-top:8px"><div class="group">
+    <div class="row col" id="t-hdr"><div class="t15">${day.region}</div><div class="t15 sec">${done} of ${total} clips</div><div class="t15 sec">About 52 min of 4K space left</div></div>
+    <div class="row" id="t-typeRow" style="--inset:56px;padding:8px 16px">${ibox(ty.icon, O, 23)}<div class="grow"><div class="t17b">${ty.title}</div><div class="t13 sec">Trip type for day ${st.sel} · tap to change</div></div>${chev()}</div>
+    <div class="row" style="--inset:56px">${ibox('sun', O, 22)}<div class="t15" style="color:${O}">${day.light}</div></div>
+    ${dayClips.length ? '' : `<div class="row" style="--inset:56px">${ibox('sparkles', '#fff', 20)}<div class="t15">Before your first shot, wipe your lens. A smudge softens every shot.</div></div>`}
+  </div></div>`;
+  for (const ph of PHASES) {
+    h += `<div class="section" id="t-sec-${ph.id}"><div class="sh">${ph.title}</div><div class="group">`;
+    for (const [k, hf] of ph.slots) {
+      const si = slotInfo(k, hf, day.type);
+      const { count } = rows[si.id];
+      const isDone = count >= si.n;
+      h += `<div class="row" id="t-row-${si.id}" style="--inset:56px;padding:8px 16px">${ibox(si.g === 'person' ? 'person' : 'hand', O, 21)}<div class="grow"><div class="t17b">${si.title}</div><div class="t15 sec">${si.sum}${si.counts ? '' : ' · extra'}</div></div><div class="t15 tnum" style="color:${isDone ? G : SEC}">${count}/${si.n}</div>${isDone ? ic('checkc', 20, G) : ''}</div>`;
+    }
+    if (ph.facts) h += `<div class="row" style="--inset:56px;padding:8px 16px">${ibox('clip', O, 21)}<div class="grow"><div class="t17b">TRIP FACTS</div><div class="t15 sec">Distance, time, cost, tips: for on-screen text and guide reels</div></div></div>`;
+    h += `</div><div class="sf">${ph.foot}</div></div>`;
+  }
+  h += `<div class="section"><div class="sh">From other cameras</div><div class="group"><div class="row" style="--inset:56px">${ibox('photo', O, 21)}<div class="t17" style="color:${O}">Add from Photos</div></div></div><div class="sf">Star time-lapses, Cinematic mode, drone or GoPro clips and photos. They're named, tagged and copied to your SSD like the rest.</div></div>`;
+  if (dayClips.length) {
+    const list = dayClips.slice().reverse().map(c => `<div class="row" id="t-clip-${c.id}"><div class="grow"><div class="t15b">${c.name}</div><div class="cap sec" style="margin-top:2px">${c.shot} · take ${c.take} · ${c.tags}</div></div><div class="cap sec tnum">${c.dur} s</div></div>`).join('');
+    h += `<div class="section" id="t-sec-clips"><div class="sh">Clips</div><div class="group" id="t-clips">${list}</div><div class="sf">Tap a clip to rename, tag or star it. Export trip makes cutouts and captions for editing, then copies everything to your SSD, sorted into continent, country and state folders.</div></div>`;
+  }
+  return h;
+}
+function reviewHTML(st) {
+  const caret = st.focused && caretOn(st.t) ? '<i class="caret"></i>' : (st.focused ? '<i class="caret" style="opacity:0"></i>' : '');
+  const field = st.name ? `<span>${st.name}</span>${caret}` : `${caret}<span class="ter">Name it, like Lower Falls or Plane</span>`;
+  let under = '';
+  if (st.note) under += `<div class="t13 sec" style="display:flex;gap:6px;align-items:center;margin-top:8px">${ic('loc', 12, SEC)}Same as your last clip here</div>`;
+  if (st.chips && st.chips.length) {
+    under += `<div class="chiprow">${st.chipsLabel ? `<span class="t13 sec" style="margin-right:2px">${st.chipsLabel}</span>` : ''}${st.chips.map((c, i) => `<span class="chip ${c.sel ? 'on' : ''}" id="rv-chip-${i}">${c.t}</span>`).join('')}</div>`;
+  } else if (st.hint) under += `<div class="t13 sec" style="margin-top:8px">${st.hint}</div>`;
+  const file = `${st.code}_${st.date}_${st.shot}_${pad2(st.take)}${st.name ? '_' + slug(st.name) : ''}.mov`;
+  return `<div class="rv">
+  <div class="player">${sceneSVG(st.kind, 'rv' + st.kind)}<div class="pplay">${ic('play', 30, '#fff')}</div><div class="ptime">0:00</div><div class="pline"></div><div class="ptime r">0:${pad2(st.dur)}</div></div>
+  <div class="block" id="rv-namebox"><div class="t17b">Name</div><div class="field" id="rv-field">${field}</div>${under}</div>
+  <div class="block" id="rv-file"><div class="t15b">${brk(file)}</div><div class="cap sec" style="margin-top:4px">${st.details}</div></div>
+  <div class="block flexrow" style="margin-top:8px"><div style="display:flex;gap:8px;align-items:center">${ic('star', 18, '#FFD60A')}<span class="t17">Best take</span></div><span class="switch"><i></i></span></div>
+  <div class="block"><div class="t17b">Tags</div><div class="t13 sec" style="display:flex;gap:6px;align-items:center;margin:8px 0 12px">${ic('sparkles', 12, SEC)}Spotted in the shot: ${st.tags}</div>
+  <div class="cap sec" style="font-weight:600;margin-bottom:6px">Water</div><div>${['waterfall', 'beach', 'ocean', 'river', 'creek', 'lake', 'swimming hole'].map(t => `<span class="tagchip ${st.tags.includes(t) ? 'on' : ''}">${t}</span>`).join('')}</div></div>
+  </div>`;
+}
+function daySheetHTML(st) {
+  const same = `<div class="row" id="d-same"><div class="t17 grow">Still at Springbrook</div>${st.choice === 'same' ? ic('check', 20, O) : ''}</div>`;
+  const nw = `<div class="row" id="d-new"><div class="t17 grow">Somewhere new</div>${st.choice === 'new' ? ic('check', 20, O) : ''}</div>`;
+  let extra = '';
+  if (st.choice === 'new') {
+    extra += `<div class="row"><div class="t17 ${st.place ? '' : 'ter'}">${st.place || 'Place name'}</div></div>`;
+    if (!st.place) extra += `<div class="row" id="d-suggest"><div class="t17" style="color:${O}">Use “Surfers Paradise”</div></div>`;
+  }
+  return `<div class="section"><div class="sh">Where are you today?</div><div class="group">${same}${nw}${extra}</div><div class="sf">A new place gets its own name in the file names. Its clips stay in this trip's folder.</div></div>
+  <div class="section"><div class="sh">Day 2 type</div><div class="group">${TYPES.map(ty => typeRow(ty, st.type === ty.id, 'd-type-')).join('')}</div><div class="sf">Day 1 keeps its own shot list and clips. Switch days at the top of the trip.</div></div>`;
+}
+function spinner(t) {
+  let s = '<svg width="20" height="20" viewBox="0 0 24 24">';
+  const k = Math.floor(t * 12) % 8;
+  for (let i = 0; i < 8; i++) { const a = i * 45; const op = 0.25 + 0.75 * (((i - k + 8) % 8) / 7); s += `<rect x="11" y="2" width="2.4" height="6" rx="1.2" fill="#fff" opacity="${op.toFixed(2)}" transform="rotate(${a} 12 12)"/>`; }
+  return s + '</svg>';
+}
+function camUIHTML(st) {
+  const busy = st.phase !== 'ready';
+  let h = `<svg width="393" height="852" style="position:absolute;inset:0"><g stroke="#fff" stroke-opacity=".3" stroke-width=".6"><path d="M131,0V852M262,0V852M0,284H393M0,568H393"/></g><rect x="136.5" y="424.5" width="120" height="3" rx="1.5" fill="#FFD60A"/></svg>`;
+  h += `<div class="ctop"><div class="cbtn" id="cam-close" style="opacity:${busy ? 0.4 : 1}">${ic('x', 18, '#fff')}</div><div class="cbtn" style="opacity:${busy ? 0 : 1}">${ic('grid', 19, '#fff')}</div><div class="grow"></div><div class="cinfo"><div class="t17b">${st.shot} · take ${st.take}</div><div class="cap" style="color:rgba(255,255,255,.8);margin-top:2px">${st.lens} · 4K · 30 fps</div></div></div>`;
+  if (!busy) h += `<div class="lenses">${['0.5x', '1x', '2x'].map(l => `<span class="lens ${l === st.lens ? 'on' : ''}">${l}</span>`).join('')}</div>`;
+  let center = '';
+  if (st.phase === 'rec') {
+    const steps = CAM_STEPS[st.shot];
+    let idx = 0; steps.forEach((s, i) => { if (st.elapsed >= s[0]) idx = i; });
+    const [a, b, text] = steps[idx];
+    const next = steps[idx + 1];
+    const left = Math.max(0, Math.ceil(b - st.elapsed - 1e-6));
+    const p = clamp((st.elapsed - a) / (b - a));
+    center = `<div class="prompt"><div class="px">${text}</div><div class="pn">${left}</div><div class="pbar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>${next ? `<div class="pnext">Next: ${next[2]}</div>` : ''}</div>`;
+  } else if (st.phase === 'saving') center = `<div class="notice">${spinner(st.t)}Saving…</div>`;
+  else if (st.msg) center = `<div class="notice" style="font-size:17px">${st.msg}</div>`;
+  h += `<div class="ccenter">${center}</div>`;
+  const before = !busy && st.before ? `<div class="before">${st.before}</div>` : '';
+  const leftSlot = st.phase === 'rec' ? `<span class="markbtn">${ic('star', 14, '#000')}Mark</span>` : '';
+  const rightSlot = busy ? '' : `<div class="timing"><div style="display:flex;gap:4px;align-items:center">${ic('timer', 11, '#fff')}No countdown</div><div style="color:rgba(255,255,255,.8)">Stops at 0:${pad2(st.stop)}</div></div>`;
+  h += `<div class="cbottom">${before}<div class="crow"><div class="slot">${leftSlot}</div><div class="rec" id="cam-rec"><i class="${busy ? 'sq' : ''}"></i></div><div class="slot r">${rightSlot}</div></div></div>`;
+  return h;
+}
+function sheetNav(left, title, right, rightOn, lid, rid) {
+  return `<div class="snav"><div class="sbtn" ${lid ? `id="${lid}"` : ''}>${left}</div><div class="stitle">${title}</div><div class="sbtn b" ${rid ? `id="${rid}"` : ''} style="color:${rightOn ? O : TER}">${right}</div></div>`;
+}
+
+// ---------- building the phone ----------
+function build() {
+  $('#screen').innerHTML = `
+  <div id="L-trips" class="layer"><div class="scroller" id="tr-scroll"><div class="content" id="tr-content"></div></div>
+    <div class="navbar"><div class="navbg" id="tr-navbg"></div><div class="navrow"><span></span><span id="tr-plus" style="display:flex;padding:6px">${ic('plus', 23, O)}</span></div></div><div class="dim"></div></div>
+  <div id="L-trip" class="layer"><div class="scroller" id="t-scroll"><div class="content" id="t-content"></div></div>
+    <div class="navbar"><div class="navbg" id="t-navbg"></div><div class="navtitle" id="t-navtitle">Springbrook</div><div class="navrow"><span class="back" id="t-back">${ic('back', 22, O)}Shot Guide</span><span id="t-export" style="display:flex;padding:4px">${ic('share', 22, O)}</span></div></div><div class="dim"></div></div>
+  <div id="L-new" class="layer sheetL"><div class="card" id="nt-card"><div id="nt-nav"></div><div class="scroller" id="nt-scroll"><div class="content" id="nt-content"></div></div></div></div>
+  <div id="L-cam" class="layer cam"><div id="cam-scene"></div><div id="cam-ui"></div><div class="dim"></div></div>
+  <div id="L-rev" class="layer sheetL"><div class="card" id="rv-card"><div id="rv-nav"></div><div class="scroller" id="rv-scroll"><div class="content" id="rv-content"></div></div></div></div>
+  <div id="L-day" class="layer sheetL"><div class="card" id="d-card"><div id="d-nav"></div><div class="scroller" id="d-scroll"><div class="content" id="d-content"></div></div></div></div>
+  <div id="status"><div id="st-time">8:05</div><div id="st-icons">${ic('signal', 17, '#fff')}${ic('wifi', 17, '#fff')}<svg width="27" height="13" viewBox="0 0 27 13"><rect x=".5" y=".5" width="23" height="12" rx="3.6" fill="none" stroke="#fff" stroke-opacity=".4"/><rect x="2" y="2" width="16" height="9" rx="2.2" fill="#fff"/><path d="M25 4.5v4a2 2 0 0 0 0-4z" fill="#fff" fill-opacity=".4"/></svg></div></div>
+  <div id="island"></div><div id="home"></div><div id="scrdip"></div><div id="tap"></div>`;
+  $('#endcard').innerHTML = `<h2>What's in this plan</h2>
+  ${[['falls', 'Name each clip', 'Steps 4 to 7'], ['plus', 'Days, added as you go', 'Steps 8 and 10'], ['mountain', 'Trip types', 'Steps 2, 3 and 9'], ['hourglass', 'When the app runs out', 'Steps 1 and 11']].map(([i, a, b]) => `<div class="erow">${ic(i, 52, O)}<div><div class="et">${a}</div><div class="es">${b}</div></div></div>`).join('')}`;
+}
+
+// ---------- applying a state ----------
+const cache = {};
+function setHTML(el, html, key) { if (cache[key] !== html) { el.innerHTML = html; cache[key] = html; } }
+function offsetIn(el, root) { let y = 0; while (el && el !== root) { y += el.offsetTop; el = el.offsetParent; } return y; }
+function resolveScroll(spec, content, viewH) {
+  const max = Math.max(0, content.offsetHeight - viewH);
+  if (spec === undefined || spec === null) return 0;
+  if (typeof spec === 'number') return clamp(spec, 0, max);
+  if (spec === 'max') return max;
+  if (spec.mix) return lerp(resolveScroll(spec.a, content, viewH), resolveScroll(spec.b, content, viewH), spec.p);
+  const el = content.querySelector(spec.sel);
+  if (!el) return 0;
+  return clamp(offsetIn(el, content) - spec.off, 0, max);
+}
+const mix = (a, b, p) => (p <= 0 ? a : p >= 1 ? b : { mix: true, a, b, p });
+function place(el, L) {
+  if (!L.vis) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.style.transform = `translate(${L.tx.toFixed(2)}px, ${L.ty.toFixed(2)}px) scale(${L.s.toFixed(4)})`;
+  el.style.borderRadius = L.r ? `${L.r.toFixed(1)}px` : '0';
+  const d = el.querySelector(':scope > .dim'); if (d) d.style.opacity = L.dim.toFixed(3);
+}
+function behind(L, p) { if (p <= 0) return; L.s *= 1 - 0.07 * p; L.ty += 10 * p; L.r = Math.max(L.r, 14 * p); L.dim += 0.38 * p; }
+const fresh = () => ({ tx: 0, ty: 0, s: 1, r: 0, dim: 0, vis: true });
+let touched = [];
+const tapCache = {};
+function apply(st) {
+  $('#st-time').textContent = st.time;
+  // root: trips list
+  const Ltr = fresh();
+  if (st.trip) { Ltr.tx = -0.3 * 393 * st.trip.x; Ltr.dim = 0.22 * st.trip.x; if (st.trip.x >= 1) Ltr.vis = false; }
+  if (st.newtrip) behind(Ltr, st.newtrip.p);
+  if (Ltr.vis) setHTML($('#tr-content'), tripsHTML(st.trips), 'trips');
+  place($('#L-trips'), Ltr);
+  // trip page (shown before it's measured: hidden elements have no size)
+  const Lt = fresh();
+  if (st.trip) {
+    Lt.tx = (1 - st.trip.x) * 393;
+    if (st.daysheet) behind(Lt, st.daysheet.p);
+    if (st.review && !st.camera) behind(Lt, st.review.p);
+    if (st.camera && st.camera.p >= 1) Lt.vis = false;
+  } else Lt.vis = false;
+  place($('#L-trip'), Lt);
+  if (Lt.vis) {
+    const c = $('#t-content');
+    setHTML(c, tripHTML(st.trip), 'trip');
+    const y = resolveScroll(st.trip.scroll, c, 852);
+    $('#t-scroll').style.transform = `translateY(${(-y).toFixed(2)}px)`;
+    $('#t-navtitle').style.opacity = clamp((y - 34) / 16).toFixed(3);
+    $('#t-navbg').style.opacity = clamp(y / 24).toFixed(3);
+  }
+  // new trip sheet
+  const Ln = $('#L-new');
+  if (st.newtrip && st.newtrip.p > 0) {
+    Ln.style.display = 'block';
+    setHTML($('#nt-nav'), sheetNav('Cancel', 'New trip', 'Create', !!st.newtrip.place, '', 'nt-create'), 'ntnav');
+    const c = $('#nt-content'); setHTML(c, newTripHTML(st.newtrip), 'nt');
+    $('#nt-scroll').style.transform = `translateY(${(-resolveScroll(st.newtrip.scroll, c, 790)).toFixed(2)}px)`;
+    $('#nt-card').style.transform = `translateY(${((1 - st.newtrip.p) * 800).toFixed(2)}px)`;
+  } else Ln.style.display = 'none';
+  // camera
+  const Lc = fresh();
+  if (st.camera && st.camera.p > 0) {
+    Lc.ty = (1 - st.camera.p) * 852;
+    if (st.review) behind(Lc, st.review.p);
+    const cam = st.camera;
+    if (cache.camKind !== cam.kind) { $('#cam-scene').innerHTML = sceneSVG(cam.kind, 'cam' + cam.kind); cache.camKind = cam.kind; cache.strands = [...document.querySelectorAll('#cam-scene .strand')]; }
+    for (const s of cache.strands) s.setAttribute('stroke-dashoffset', (-(st.clock * +s.dataset.v + +s.dataset.o)).toFixed(1));
+    setHTML($('#cam-ui'), camUIHTML(cam), 'camui');
+  } else Lc.vis = false;
+  place($('#L-cam'), Lc);
+  $('#status').style.opacity = st.camera ? (1 - clamp((st.camera.p - 0.2) / 0.5)).toFixed(3) : '1';
+  // review sheet
+  const Lr = $('#L-rev');
+  if (st.review && st.review.p > 0) {
+    Lr.style.display = 'block';
+    setHTML($('#rv-nav'), sheetNav('', st.review.title, 'Done', true, '', 'rv-done'), 'rvnav');
+    setHTML($('#rv-content'), reviewHTML(st.review), 'rv');
+    $('#rv-card').style.transform = `translateY(${((1 - st.review.p) * 800).toFixed(2)}px)`;
+  } else Lr.style.display = 'none';
+  // day sheet
+  const Ld = $('#L-day');
+  if (st.daysheet && st.daysheet.p > 0) {
+    Ld.style.display = 'block';
+    setHTML($('#d-nav'), sheetNav('Cancel', 'Start day 2', 'Start', true, '', 'd-start'), 'dnav');
+    setHTML($('#d-content'), daySheetHTML(st.daysheet), 'd');
+    $('#d-card').style.transform = `translateY(${((1 - st.daysheet.p) * 800).toFixed(2)}px)`;
+  } else Ld.style.display = 'none';
+  $('#scrdip').style.opacity = (st.dip || 0).toFixed(3);
+  // highlights and taps
+  for (const el of touched) { el.style.boxShadow = ''; el.style.backgroundColor = ''; }
+  touched = [];
+  for (const h of st.hl) {
+    if (!(h.a > 0)) continue;
+    const el = $(h.sel); if (!el) continue;
+    el.style.boxShadow = `inset 0 0 0 2px rgba(255,159,10,${h.a.toFixed(3)})`;
+    el.style.backgroundColor = `rgba(255,159,10,${(0.14 * h.a).toFixed(3)})`;
+    touched.push(el);
+  }
+  const tapEl = $('#tap'); tapEl.style.opacity = '0';
+  st.taps.forEach((tp, n) => {
+    const age = st.local - tp.at;
+    if (age < 0 || age >= 0.55) return;
+    const el = $(tp.sel); if (!el) return;
+    // The ring stays where the finger landed, even if a sheet then slides over that spot.
+    const key = st.sceneIdx + ':' + n;
+    if (!tapCache[key] || age < 0.034) {
+      const r = el.getBoundingClientRect(), sr = $('#screen').getBoundingClientRect(), k = sr.width / 393;
+      tapCache[key] = [(r.left + r.width / 2 - sr.left) / k + (tp.dx || 0), (r.top + r.height / 2 - sr.top) / k + (tp.dy || 0)];
+    }
+    const [x, y] = tapCache[key];
+    const op = age < 0.08 ? age / 0.08 : age < 0.26 ? 1 : 1 - (age - 0.26) / 0.29;
+    const sc = 0.72 + 0.38 * easeOut(clamp(age / 0.3));
+    tapEl.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${sc.toFixed(3)})`;
+    tapEl.style.opacity = clamp(op).toFixed(3);
+    if (age < 0.3 && el.classList.contains('row')) { el.style.backgroundColor = 'rgba(255,255,255,.1)'; touched.push(el); }
+  });
+  $('#sped').style.opacity = (st.sped || 0).toFixed(3);
+  $('#enddim').style.opacity = (0.82 * (st.endP || 0)).toFixed(3);
+  $('#endcard').style.opacity = (st.endP || 0).toFixed(3);
+  $('#endcard').style.transform = `translateY(${((1 - (st.endP || 0)) * 30).toFixed(1)}px)`;
+  $('#fade').style.opacity = (1 - (st.fade === undefined ? 1 : st.fade)).toFixed(3);
+}
+
+// ---------- captions ----------
+function capHTML(c, bodyOnly) {
+  if (bodyOnly) return `<div style="visibility:hidden"><span class="pill">${c.step}</span><div class="ctitle">${c.title}</div></div><div class="cbody">${c.body}</div>`;
+  return `<span class="pill">${c.step}</span><div class="ctitle">${c.title}</div><div class="cbody">${c.body}</div>`;
+}
+function capsOf(i) {
+  const out = []; let last = {};
+  for (const c of SCENES[i].cap) { last = Object.assign({}, last, c); if (typeof last.step === 'number') last.stepLabel = 'STEP ' + last.step; out.push(Object.assign({}, last, { step: typeof last.step === 'number' ? 'STEP ' + last.step : last.step })); }
+  return out;
+}
+function applyCaption(i, t) {
+  const caps = capsOf(i);
+  let ci = 0; caps.forEach((c, k) => { if (c.at <= t) ci = k; });
+  const cur = caps[ci];
+  let prev = null;
+  if (ci > 0) prev = caps[ci - 1]; else if (i > 0) { const pc = capsOf(i - 1); prev = pc[pc.length - 1]; }
+  const dt = t - cur.at;
+  const A = $('#capA'), B = $('#capB');
+  if (!prev) { A.innerHTML = capHTML(cur); A.style.opacity = clamp((t - 0.15) / 0.5).toFixed(3); B.style.opacity = '0'; return; }
+  const sameStep = prev.step === cur.step && prev.title === cur.title;
+  if (sameStep) {
+    // title stays, body crossfades
+    A.innerHTML = `<span class="pill">${cur.step}</span><div class="ctitle">${cur.title}</div><div class="cbody" style="opacity:${clamp((dt - 0.2) / 0.3).toFixed(3)}">${cur.body}</div>`;
+    A.style.opacity = '1';
+    B.innerHTML = capHTML(prev, true); B.style.opacity = (1 - clamp(dt / 0.2)).toFixed(3);
+  } else {
+    A.innerHTML = capHTML(cur); A.style.opacity = clamp((dt - 0.2) / 0.3).toFixed(3);
+    B.innerHTML = capHTML(prev); B.style.opacity = (1 - clamp(dt / 0.2)).toFixed(3);
+  }
+}
+
+// ---------- the walkthrough ----------
+const SCENES = [];
+function scene(id, dur, cap, render) { SCENES.push({ id, dur, cap, render }); }
+function base(time) { return { time, trips: { warn: 0, spring: null }, newtrip: null, trip: null, camera: null, review: null, daysheet: null, taps: [], hl: [], sped: 0, endP: 0 }; }
+const ATSPOT = { sel: '#t-sec-atspot', off: 92 };
+const ARRIVING = { sel: '#t-sec-arriving', off: 92 };
+const ATSPOT_LOW = { sel: '#t-sec-atspot', off: 40 };
+function T(o) { return Object.assign({ x: 1, sel: 1, days: 1, clips: [], scroll: 0 }, o); }
+function cam(o) { return Object.assign({ p: 1, kind: 'lower', shot: 'WIDE', take: 1, lens: '0.5x', phase: 'ready', elapsed: 0, before: '', stop: 14, msg: '', t: 0 }, o); }
+function rev(o) { return Object.assign({ p: 1, title: '', kind: 'lower', name: '', focused: false, note: false, chips: [], chipsLabel: '', hint: '', code: 'Springbrook', date: '2026-11-14', shot: 'WIDE', take: 1, details: '', dur: 14, tags: 'waterfall, rainforest', t: 0 }, o); }
+const spedFor = (t, a, b) => (t >= a - 0.15 && t <= b + 0.15) ? Math.min(clamp((t - a + 0.15) / 0.2), clamp((b + 0.15 - t) / 0.2)) : 0;
+
+// 1. Trips screen
+scene('s01', 5.0, [{ at: 0, step: 1, title: 'Trips screen', body: 'A new line at the top shows when this install stops opening.' }], t => {
+  const st = base('8:05');
+  st.hl = [{ sel: '#tr-install', a: pulse(t, 1.0, 4.4) }];
+  st.fade = clamp(t / 0.5);
+  return st;
+});
+// 2. New trip with a type
+scene('s02', 11.6, [
+  { at: 0, step: 2, title: 'New trip: pick a type', body: 'Pick what kind of trip it is. The type tunes the shot list and the tips for each shot.' },
+  { at: 4.6, body: 'No single or multi-day choice here. You add days as you go.' },
+  { at: 7.8, body: 'File names now end with the name you give each clip.' }
+], t => {
+  const st = base('8:06');
+  st.trips.spring = t >= 10.9 ? 'new' : null;
+  st.newtrip = { p: present(t, 0.45, 10.75), place: t >= 1.95 ? 'Springbrook' : '', type: t >= 3.45 ? 'falls' : 'general', scroll: mix(0, 'max', prog(t, 6.9, 0.9, easeInOut)) };
+  st.taps = [{ sel: '#tr-plus', at: 0.25 }, { sel: '#nt-suggest', at: 1.8, dx: -90 }, { sel: '#nt-type-falls', at: 3.3, dx: -40 }, { sel: '#nt-create', at: 10.5 }];
+  st.hl = [{ sel: '#nt-typefoot', a: pulse(t, 4.8, 6.7) }, { sel: '#nt-filefoot', a: pulse(t, 8.0, 10.2) }];
+  return st;
+});
+// 3. The shot list follows the type
+scene('s03', 9.4, [{ at: 0, step: 3, title: 'The shot list follows the type', body: 'For waterfalls: more DETAIL and SLOMO takes, and 2 AMBIENT takes for the sound of the falls.' }], t => {
+  const st = base('8:07'); st.trips.spring = 'new';
+  st.trip = T({ x: prog(t, 0.0, 0.5, springy), scroll: mix(0, ATSPOT, prog(t, 2.6, 1.2, easeInOut)) });
+  st.hl = [{ sel: '#t-typeRow', a: pulse(t, 0.8, 2.3) }, { sel: '#t-row-AMBIENT', a: pulse(t, 4.0, 7.6) }, { sel: '#t-row-DETAIL', a: pulse(t, 4.0, 7.6) }, { sel: '#t-row-SLOMO', a: pulse(t, 4.0, 7.6) }];
+  st.taps = [{ sel: '#t-row-WIDE', at: 8.7 }];
+  return st;
+});
+// 4. Name the first clip
+scene('s04', 12.6, [
+  { at: 0, step: 4, title: 'Name your first clip', body: "Film the shot as usual. It's sped up here." },
+  { at: 4.3, body: 'After the take, give the clip a name. It goes on the end of the file name.' }
+], t => {
+  const st = base('10:12'); st.trips.spring = 'new'; st.clock = t;
+  st.trip = T({ scroll: ATSPOT, clips: t >= 3.75 ? [CL1] : [] });
+  const after = t >= 10.6;
+  const phase = t < 1.25 ? 'ready' : t < 3.75 ? 'rec' : t < 4.1 ? 'saving' : 'ready';
+  st.camera = cam({ p: present(t, 0.0, 11.4), phase, elapsed: clamp((t - 1.25) / 2.5) * 14, t, take: after ? 2 : 1, lens: after ? '1x' : '0.5x', before: after ? 'Same again at 1x.' : 'Show the whole place and its scale.' });
+  const name = typed('Lower Falls', t, 6.0, 11);
+  st.review = rev({ p: present(t, 4.1, 10.4), title: 'WIDE · take 1', name, focused: t >= 5.75, t, hint: 'Names you use show up here, one tap to reuse.', details: 'Day · 0.5x · 30 fps · 14.0 s' });
+  st.taps = [{ sel: '#cam-rec', at: 1.1 }, { sel: '#rv-field', at: 5.7 }, { sel: '#rv-done', at: 10.2 }, { sel: '#cam-close', at: 11.2 }];
+  st.hl = [{ sel: '#rv-file', a: pulse(t, 7.4, 9.6) }];
+  st.sped = spedFor(t, 1.25, 3.75);
+  return st;
+});
+// 5. The next clip already has the name
+scene('s05', 8.8, [{ at: 0, step: 5, title: 'The next clip is already named', body: 'Still at Lower Falls, so the name is filled in. Just tap Done.' }], t => {
+  const st = base('10:15'); st.trips.spring = 'new'; st.clock = t;
+  st.trip = T({ scroll: ATSPOT, clips: t >= 2.85 ? [CL1, CL2] : [CL1] });
+  const after = t >= 6.9;
+  const phase = t < 1.65 ? 'ready' : t < 2.85 ? 'rec' : t < 3.15 ? 'saving' : 'ready';
+  st.camera = cam({ p: present(t, 0.45, 7.45), kind: 'detail', shot: 'DETAIL', take: after ? 2 : 1, lens: '1x', phase, elapsed: clamp((t - 1.65) / 1.2) * 8, t, stop: 8, before: 'Get close and tap the detail to focus first.' });
+  st.review = rev({ p: present(t, 3.15, 6.5), title: 'DETAIL · take 1', kind: 'detail', name: 'Lower Falls', note: true, chips: [{ t: 'Lower Falls', sel: true }], shot: 'DETAIL', details: 'Day · 1x · 30 fps · 8.0 s', dur: 8, tags: 'rainforest, rocks', t });
+  st.taps = [{ sel: '#t-row-DETAIL', at: 0.3 }, { sel: '#cam-rec', at: 1.5 }, { sel: '#rv-done', at: 6.35 }, { sel: '#cam-close', at: 7.3 }];
+  st.hl = [{ sel: '#rv-namebox', a: pulse(t, 3.9, 6.0) }];
+  st.sped = spedFor(t, 1.65, 2.85);
+  return st;
+});
+// 6. At the next waterfall
+scene('s06', 11.2, [{ at: 0, step: 6, title: 'At the next waterfall', body: "You've walked on, so the name box starts empty, with Lower Falls one tap away." }], t => {
+  const st = base('10:41'); st.trips.spring = 'new'; st.clock = t;
+  st.trip = T({ scroll: ATSPOT, clips: t >= 3.4 ? [CL1, CL2, CL3] : [CL1, CL2] });
+  const phase = t < 1.75 ? 'ready' : t < 3.4 ? 'rec' : t < 3.7 ? 'saving' : 'ready';
+  const after = t >= 9.0;
+  st.camera = cam({ p: present(t, 0.55, 10.05), kind: 'twin', take: after ? 3 : 2, lens: '1x', phase, elapsed: clamp((t - 1.75) / 1.65) * 14, t, before: after ? '' : 'Same again at 1x.', msg: after ? 'All 2 takes done. Film an extra, or tap ✕ to pick the next shot.' : '' });
+  const name = typed('Twin Falls', t, 6.6, 11);
+  st.review = rev({ p: present(t, 3.7, 8.75), title: 'WIDE · take 2', kind: 'twin', name, focused: t >= 6.35, take: 2, chips: [{ t: 'Lower Falls', sel: false }], chipsLabel: 'Recent', details: 'Day · 1x · 30 fps · 14.0 s', t });
+  st.taps = [{ sel: '#t-row-WIDE', at: 0.4 }, { sel: '#cam-rec', at: 1.6 }, { sel: '#rv-field', at: 6.3 }, { sel: '#rv-done', at: 8.6 }, { sel: '#cam-close', at: 9.9 }];
+  st.hl = [{ sel: '#rv-chip-0', a: pulse(t, 4.6, 6.1) }];
+  st.sped = spedFor(t, 1.75, 3.4);
+  return st;
+});
+// 7. Names in the clip list, and renaming
+scene('s07', 9.4, [{ at: 0, step: 7, title: 'Names in the clip list', body: 'Each clip shows its name. Tap one to rename it, and its file is renamed too.' }], t => {
+  const st = base('10:43'); st.trips.spring = 'new';
+  st.trip = T({ scroll: mix(ATSPOT, 'max', prog(t, 0.2, 1.4, easeInOut)), clips: t >= 8.3 ? [CL1, CL2r, CL3] : [CL1, CL2, CL3] });
+  const name = 'Lower Falls' + typed(' ferns', t, 5.9, 11);
+  st.review = rev({ p: present(t, 4.35, 8.25), title: 'Clip', kind: 'detail', name, focused: t >= 5.6 && t < 8.25, chips: [{ t: 'Twin Falls', sel: false }, { t: 'Lower Falls', sel: name === 'Lower Falls' }], shot: 'DETAIL', details: 'Day · 1x · 30 fps · 8.0 s', dur: 8, tags: 'rainforest, rocks', t });
+  st.taps = [{ sel: '#t-clip-c2', at: 4.2 }, { sel: '#rv-field', at: 5.55, dx: 60 }, { sel: '#rv-done', at: 8.1 }];
+  st.hl = [{ sel: '#t-clips', a: pulse(t, 1.8, 3.8) }, { sel: '#rv-file', a: pulse(t, 6.6, 7.9) }];
+  return st;
+});
+// 8. Start day 2
+scene('s08', 10.6, [{ at: 0, step: 8, title: 'Next morning: start day 2', body: 'Tap + Day 2 for a fresh shot list. Moved on? Give the day its own place and type.' }], t => {
+  const st = base('7:40'); st.trips.spring = 'new';
+  const started = t >= 8.15;
+  st.trip = T({ scroll: started ? 0 : mix('max', 0, prog(t, 0.1, 1.0, easeInOut)), clips: [CL1, CL2r, CL3], sel: started ? 2 : 1, days: started ? 2 : 1 });
+  st.daysheet = { p: present(t, 1.65, 8.15), choice: t >= 3.05 ? 'new' : 'same', place: t >= 4.25 ? 'Surfers Paradise' : '', type: t >= 5.45 ? 'city' : 'falls' };
+  st.taps = [{ sel: '#t-chip-add', at: 1.5 }, { sel: '#d-new', at: 2.9, dx: -80 }, { sel: '#d-suggest', at: 4.1, dx: -80 }, { sel: '#d-type-city', at: 5.3, dx: -40 }, { sel: '#d-start', at: 8.0 }];
+  st.hl = [{ sel: '#d-type-city', a: pulse(t, 5.9, 7.6) }];
+  return st;
+});
+// 9. A city day
+scene('s09', 8.6, [{ at: 0, step: 9, title: 'A city day', body: 'FOOD and FOLLOW count now, and the tips change, like a TIMELAPSE of traffic at blue hour.' }], t => {
+  const st = base('7:41'); st.trips.spring = 'new';
+  const sc = t < 4.0 ? mix(0, ARRIVING, prog(t, 1.4, 1.0, easeInOut)) : mix(ARRIVING, ATSPOT_LOW, prog(t, 4.0, 1.0, easeInOut));
+  st.trip = T({ scroll: sc, clips: [CL1, CL2r, CL3], sel: 2, days: 2 });
+  st.hl = [{ sel: '#t-typeRow', a: pulse(t, 0.1, 1.3) }, { sel: '#t-row-FOLLOW', a: pulse(t, 2.5, 3.8) }, { sel: '#t-row-FOOD', a: pulse(t, 5.1, 7.9) }, { sel: '#t-row-TIMELAPSE', a: pulse(t, 5.1, 7.9) }];
+  return st;
+});
+// 10. Day 1 is one tap away
+scene('s10', 5.2, [{ at: 0, step: 10, title: 'Day 1 is one tap away', body: 'Each day keeps its own shot list, counts and clips.' }], t => {
+  const st = base('7:42'); st.trips.spring = 'multi';
+  st.trip = T({ x: 1 - prog(t, 4.35, 0.5, springy), scroll: mix(ATSPOT_LOW, 0, prog(t, 0.1, 0.8, easeInOut)), clips: [CL1, CL2r, CL3], sel: t >= 1.45 ? 1 : 2, days: 2 });
+  st.taps = [{ sel: '#t-chip-1', at: 1.3 }, { sel: '#t-back', at: 4.2 }];
+  st.hl = [{ sel: '#t-hdr', a: pulse(t, 1.7, 3.6) }];
+  return st;
+});
+// 11. Two days before it runs out
+scene('s11', 8.2, [{ at: 0, step: 11, title: 'Two days before it runs out', body: 'The line turns orange so you reinstall before your next trip. Your trips and clips stay.' }], t => {
+  const st = base(t < 1.6 ? '7:43' : '7:12'); st.trips.spring = 'multi';
+  st.trips.warn = t < 1.6 ? 0 : 1;
+  st.dip = t < 1.2 ? 0 : t < 1.6 ? (t - 1.2) / 0.4 * 0.85 : 0.85 * (1 - clamp((t - 1.6) / 0.45));
+  st.hl = [{ sel: '#tr-install', a: pulse(t, 2.3, 6.8) }];
+  return st;
+});
+// 12. The end card
+scene('s12', 6.0, [{ at: 0, step: '1.7 PLAN', title: "That's the plan for 1.7", body: 'Tell me what to change, by step number or the time in the video.' }], t => {
+  const st = base('7:12'); st.trips.spring = 'multi'; st.trips.warn = 1;
+  st.endP = prog(t, 0.2, 0.7, easeOut);
+  return st;
+});
+
+// ---------- entry points ----------
+function renderScene(i, t) {
+  const sc = SCENES[i];
+  const st = sc.render(t);
+  st.local = t; st.sceneIdx = i; if (st.clock === undefined) st.clock = t;
+  apply(st);
+  applyCaption(i, t);
+}
+window.SCENES_META = SCENES.map(s => ({ id: s.id, dur: s.dur }));
+window.renderScene = renderScene;
+document.fonts.ready.then(() => { build(); renderScene(0, 2); window.ready = true; });
+</script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+import json
+F = [
+ (1, "Mood loop", "A big song moment with you small in a huge view and a one-line caption, built to loop. Often friends or the two of you.",
+  "R29 (140K reposts, 277K saves), R35 (229K saves), R03 (62.6K reposts)",
+  [("WIDE", "in shot, you small in the view"), ("TELE", "you tiny on a ridge or a road"), ("WALKAWAY", "walking off into the view"),
+   ("MOMENT", "arms out, or lying in the grass"), ("SILHOUETTE", "at sunset"), ("FOLLOW", "her leading you by the hand"),
+   ("DETAIL", ""), ("WILDLIFE", "whenever there are animals"), ("REFLECTION", "when there's still water")],
+  "A song with a big moment. Start and end on the same shot so it loops."),
+ (2, "Place film", "A title card naming the place, then a montage of it that ends where it started. The casual version is a week of phone clips with the title at the end.",
+  "T20 (288.5K likes), R18 (10.9K reposts), T13",
+  [("WIDE", "the first one with sky above you, for the title"), ("REVEAL", "any version"), ("ON THE WAY", "the drive, train or flight there"),
+   ("B-ROLL", "signs with the place's name, locals, traffic"), ("TELE", ""), ("WALKAWAY", ""), ("MOMENT", ""), ("DETAIL", ""), ("FOOD", ""), ("WILDLIFE", "")],
+  "The place's name."),
+ (3, "One line", "One line of text over a calm hold or a few shots: relatable, a question and answer, or about the place. Some set up and pay off: \"I wonder what the view is like from up there…\", then you're up there.",
+  "T02 (8.7M views), T21 (2.2M likes), T19 (1.4M likes), T22 (1.3M likes)",
+  [("MOMENT", "lying in the grass, sitting at the edge"), ("SILHOUETTE", "a side-on profile"), ("ON THE WAY", "out of a train or boat window"),
+   ("REVEAL", "Tilt up, from the water to the view"), ("WIDE", "held still without you, for a one-shot version"), ("POV", "the payoff from the top"), ("DETAIL", "")],
+  "The line. Jot it down when it comes to you."),
+ (4, "Daydream bookend", "In bed at night lit by your phone, then the trip as memories, then back in bed.",
+  "R20 (42.7K reposts)",
+  [("HOME", "After: in bed at night, lit by your phone"), ("POV", "lying down with your feet in the grass"), ("B-ROLL", "casual handheld memories"), ("MOMENT", ""), ("WILDLIFE", "")],
+  "A song."),
+ (5, "Price list", "Each trip's name and total cost per person on black, starting and ending at the airport.",
+  "R24",
+  [("WIDE", "one hero shot per trip"), ("ON THE WAY", "at the airport or the gate"), ("HOME", "Before: packing, leaving")],
+  "What each trip cost per person, all in."),
+ (6, "Trend overlay", "A game-style overlay on ordinary travel footage, added in the edit.",
+  "R06",
+  [("B-ROLL", ""), ("POV", ""), ("WIDE", "")],
+  "Nothing special. The overlay is done in the edit."),
+ (7, "Guide", "You talking with captions: real info (costs, an itinerary, how to get there, a review) or your own story, cut with the place.",
+  "T11 (2.1M views), T04 (888.3K), T03 (454K), T18 (298.5K likes)",
+  [("TALK", "Walking for walk-and-talks, Tripod for set pieces"), ("REACTION", ""), ("POV", ""), ("B-ROLL", "signs and the way in"),
+   ("WIDE", "the payoff view"), ("SLOMO", "a jump or a splash"), ("VOICEOVER", ""), ("DETAIL", ""), ("FOOD", "for reviews")],
+  "Place facts (distance, time, cost, how to get there), and screenshots of maps and bookings brought in with Add from Photos."),
+ (8, "Same frame, many places", "The same pose at the same spot in the frame, in front of many places: a leap through them one per beat, or a run across strips of them side by side.",
+  "R30 (80.1M views), R31 (78.4M views)",
+  [("MATCH CUT", "at every stop, the same pose: a leap, arms out, a spin, or a side-on run at the same height")],
+  "One pose, kept all trip. It builds up over trips."),
+ (9, "One walk, many skies", "A silhouette walks a ridge while the peaks and sky behind change on every beat.",
+  "R11",
+  [("TELE", "you walking across the frame as a silhouette"), ("B-ROLL", "on the 5x: peaks and skies at different times of day"), ("TIMELAPSE", "the sky changing")],
+  ""),
+ (10, "Scene recreation", "A famous film moment acted out at a place.",
+  "R40 (279K reposts, 409K saves), R21",
+  [("POV", "often one take, like the Boromir death"), ("WIDE", "in shot, on the tripod")],
+  "The scene, picked before the trip for a place that suits it."),
+ (11, "One-shot wonder", "One unbroken shot of something astonishing with nothing on screen. The caption does the talking.",
+  "T16 (5.1M views), T08 (1.8M)",
+  [("WIDE", "without you, held about 12 seconds, on the tripod if you can"), ("REVEAL", "Tilt up, from the water to the view")],
+  ""),
+ (12, "Photo list carousel", "A cover with a promise, one labelled photo per place, then a slide asking for a save.",
+  "T09 (10.1M views), T01 (324.4K)",
+  [("WIDE", "I take a hero still from it at every place"), ("DETAIL", "")],
+  "Place facts for the labels or scores. I can make the route map from where your clips were filmed."),
+ (13, "Camera roll carousel", "Your best photos from a trip with almost no text.",
+  "T05 (2.6M views), T10 (1M)",
+  [("WIDE", ""), ("TELE", ""), ("MOMENT", ""), ("WILDLIFE", ""), ("DETAIL", "")],
+  "Nothing extra: I take the stills from your clips."),
+ (14, "Numbered list", "\"7 places to visit in January\": a number, the place and one fact on each, cut to the beat.",
+  "T14 (1.1M views)",
+  [("B-ROLL", "several clips at each place"), ("WIDE", ""), ("DETAIL", ""), ("FOOD", "")],
+  "One fact per place in Place facts. It builds up over trips."),
+ (15, "Stay tour", "Walking into an unusual place to stay with your real reactions.",
+  "T15 (2.8M views)",
+  [("STAY", "through the door on the gimbal, saying what you really think"), ("DETAIL", "the best bits")],
+  "Somewhere special to stay."),
+ (16, "Lookalike list", "\"This is Japan\" over a place that looks like it, then Japan is struck out and the real place named.",
+  "R32 (35.8M views), R33 (3.7M)",
+  [("WIDE", "a hero shot at each place that looks like somewhere famous"), ("B-ROLL", "a second angle on the same place")],
+  "Note what each place looks like as you go. It builds up over trips."),
+ (17, "Lyric montage", "The song's words on screen, one phrase per clip: word by word in the middle, or as film subtitles.",
+  "R34 (108K reposts), R39 (95.6K)",
+  [("MOMENT", ""), ("WALKAWAY", ""), ("ON THE WAY", ""), ("SLOMO", ""), ("POV", ""), ("B-ROLL", "casual handheld")],
+  "The song, picked before the trip, so you can film what the words say."),
+ (18, "Skit", "A joke line and a bit of acting at a place.",
+  "R46 (119K reposts, 159K saves), R47",
+  [("WIDE", "in shot, on the tripod, for the setup"), ("WALKAWAY", "running or walking off"), ("TELE", "you tiny, still going, in other places")],
+  "The joke, planned before the trip. She can film the setup."),
+ (19, "Hype edit", "A trip cut fast to a rap song, with the lyrics huge behind you, clones and cut-outs.",
+  "R43 (25.3K reposts)",
+  [("CLONE", ""), ("WIDE", "in shot, with big sky or water behind you for the words"), ("WALKAWAY", ""), ("SLOMO", ""), ("POV", ""), ("REACTION", ""), ("B-ROLL", ""), ("DETAIL", "sunglasses reflecting the view")],
+  "A rap song with punchy lyrics."),
+]
+counts = {}
+for n, name, what, best, shots, also in F:
+    for s, _ in shots:
+        counts[s] = counts.get(s, 0) + 1
+md = {}
+for n, name, what, best, shots, also in F:
+    lines = [f"## {n}. {name}", "", what, "", f"**Best examples:** {best}", "", "**Shots to get:**", ""]
+    for s, note in shots:
+        lines.append(f"- **{s}**" + (f": {note}" if note else ""))
+    if also:
+        lines += ["", f"**Also need:** {also}"]
+    md[f"f{n:02d}"] = "\n".join(lines)
+ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+json.dump({"md": md, "counts": ranked}, open('sheet.json', 'w'), indent=1)
+print(ranked)
+print(md['f01'])

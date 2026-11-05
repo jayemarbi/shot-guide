@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<title>Denver dance concept</title>
+<style>
+  html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #000; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+  #stage > * { position: absolute; left: 0; top: 0; width: 1080px; height: 1920px; }
+  #gl { filter: contrast(1.04) saturate(1.07); }
+  #fx { mix-blend-mode: screen; pointer-events: none; }
+  #grain { mix-blend-mode: overlay; opacity: 0.22; }
+  #vig { background: radial-gradient(ellipse 78% 62% at 50% 48%, rgba(0,0,0,0) 55%, rgba(10,6,20,0.42) 100%); }
+  #flash { background: #fff8ee; opacity: 0; }
+  #text { pointer-events: none; }
+  .hook { position: absolute; left: 0; right: 0; top: 250px; text-align: center; color: #fff; }
+  .kicker { font: 600 30px/1 'Inter', sans-serif; letter-spacing: 9px; opacity: 0; margin-bottom: 26px; text-shadow: 0 2px 14px rgba(40,20,40,.35); }
+  .line { font: 800 108px/1.04 'Inter Display', 'Inter', sans-serif; letter-spacing: -2px; opacity: 0; text-shadow: 0 6px 30px rgba(60,20,40,.35); }
+  .end { position: absolute; left: 0; right: 0; top: 330px; text-align: center; color: #fff; opacity: 0; }
+  .place { font: italic 500 78px/1.1 'Lora', serif; text-shadow: 0 3px 24px rgba(70,20,40,.65), 0 1px 3px rgba(70,20,40,.5); }
+  .handle { margin-top: 20px; font: 600 38px/1 'Inter', sans-serif; letter-spacing: 5px; text-shadow: 0 2px 18px rgba(70,20,40,.7), 0 1px 3px rgba(70,20,40,.55); }
+</style>
+<script type="importmap">{"imports":{"three":"./lib/three/build/three.module.js","three/addons/":"./lib/three/examples/jsm/"}}</script>
+</head><body>
+<svg width="0" height="0" style="position:absolute"><filter id="dblur" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB"><feGaussianBlur id="dblurk" stdDeviation="0 0" edgeMode="duplicate"/></filter></svg>
+<div id="stage">
+  <canvas id="gl" width="1080" height="1920"></canvas>
+  <canvas id="fx" width="1080" height="1920"></canvas>
+  <div id="flash"></div>
+  <div id="vig"></div>
+  <canvas id="grain" width="540" height="960" style="width:1080px;height:1920px"></canvas>
+  <div id="text">
+    <div class="hook"><div class="kicker" id="kicker">DENVER · COLORADO</div><div class="line" id="l1">1 song.</div><div class="line" id="l2">5 views.</div><div class="line" id="l3">1 dance.</div></div>
+    <div class="end" id="end"><div class="place">Denver, Colorado</div><div class="handle">@jodyseescoolstuff</div></div>
+  </div>
+</div>
+<script type="module" src="./js/main.js"></script>
+</body></html>
