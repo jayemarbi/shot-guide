@@ -251,11 +251,11 @@ struct Trip: Codable, Identifiable, Hashable {
 
     /// The everyday coverage a day asks for: the core shots, counted role by role (see `dayCoverage`).
     func targetTotal(day number: Int) -> Int {
-        dayCoverage(number).everydayTarget
+        dayCoverage(number).target(.everyday)
     }
 
     func doneTotal(day number: Int) -> Int {
-        dayCoverage(number).everydayDone
+        dayCoverage(number).done(.everyday)
     }
 
     var targetTotal: Int {
