@@ -56,6 +56,20 @@ struct Clip: Codable, Identifiable, Hashable {
     /// "Landscape" (a wide clip) or "Portrait" (a tall one), from how the phone was held as recording started.
     /// nil for clips from before 1.10 and ones added from Photos. 1.10 to 1.12 said "Sideways" and "Upright".
     var orientation: String? = nil
+    /// The creative role the take was filmed for, like "establishing" for WIDE (1.19). A stable id: it never
+    /// changes when the role's title does. nil for older takes, imports and shots without roles.
+    var role: String? = nil
+    /// The scene on its day, counted from 1: clips filmed close together (1.19). nil for older takes and imports,
+    /// which get one worked out when needed.
+    var scene: Int? = nil
+    /// true once you've put the clip in its scene yourself (moved, merged, split or confirmed it). Otherwise the
+    /// scene is the app's suggestion.
+    var sceneConfirmed: Bool? = nil
+    /// How long the take was set to run, extra seconds included, for takes that stop by themselves (1.19).
+    var plannedLength: Double? = nil
+    /// Your verdict after looking at the take: true is Usable (and overrides a failed take check), false is Not
+    /// usable. nil until you say, when a technically fine take counts provisionally.
+    var usable: Bool? = nil
 
     static let appleLog = "Apple Log"
     static let normalColour = "Normal"
@@ -181,6 +195,8 @@ struct Trip: Codable, Identifiable, Hashable {
     var placeFacts: [String: TripFacts]? = nil
     /// Every day of the trip, from day 1. nil for trips from before days existed: they have one General day.
     var days: [TripDay]? = nil
+    /// Your choice for the next clip: start a new scene, or stay in the last one (1.19).
+    var nextScene: SceneChoice? = nil
 
     var regionLine: String {
         [state, country].filter { !$0.isEmpty }.joined(separator: ", ")
@@ -233,17 +249,13 @@ struct Trip: Codable, Identifiable, Hashable {
         clips.filter { $0.shot == shot.rawValue && $0.dayNumber == number }.count
     }
 
-    /// Counted row by row on the trip page, so a transition needs both its Out and In halves.
+    /// The everyday coverage a day asks for: the core shots, counted role by role (see `dayCoverage`).
     func targetTotal(day number: Int) -> Int {
-        let type = day(number).type
-        return TripPhase.allSlots.filter { $0.counts(for: type) }.reduce(0) { $0 + $1.target(for: type) }
+        dayCoverage(number).everydayTarget
     }
 
     func doneTotal(day number: Int) -> Int {
-        let type = day(number).type
-        return TripPhase.allSlots.filter { $0.counts(for: type) }.reduce(0) {
-            $0 + min($1.takeCount(in: self, day: number), $1.target(for: type))
-        }
+        dayCoverage(number).everydayDone
     }
 
     var targetTotal: Int {

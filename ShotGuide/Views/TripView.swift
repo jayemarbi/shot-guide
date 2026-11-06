@@ -56,13 +56,18 @@ struct TripView: View {
         List {
             daysSection(trip)
             headerSection(trip)
+            sceneSection(trip)
             ForEach(TripPhase.allCases) { phase in
                 phaseSection(phase, trip: trip)
             }
             importSection
             clipsSection(trip)
         }
-        .onAppear(perform: scheduleLightAlerts)
+        .onAppear {
+            // Where you are, for the light and for noticing a new scene before you film it.
+            location.start()
+            scheduleLightAlerts()
+        }
         .navigationTitle(trip.place)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -87,7 +92,7 @@ struct TripView: View {
         if slot.shot == .voiceover {
             VoiceoverView(tripID: tripID, day: currentDay)
         } else {
-            ShotCameraView(tripID: tripID, shot: slot.shot, day: currentDay, fixedVariant: slot.half)
+            ShotCameraView(tripID: tripID, shot: slot.shot, day: currentDay, fixedVariant: slot.half, role: slot.role)
         }
     }
 
@@ -165,13 +170,14 @@ struct TripView: View {
         return Section {
             VStack(alignment: .leading, spacing: 4) {
                 Text(regionText(trip, day: day))
-                Text("\(trip.doneTotal(day: number)) of \(trip.targetTotal(day: number)) clips")
-                    .foregroundStyle(.secondary)
+                coverageLine(trip, day: number)
                 if store.spaceLeftText != nil {
                     spaceLine()
                 }
             }
             .font(.subheadline)
+            nextRow(trip, day: number)
+            missingGroup(trip, day: number)
             if let copyProgress {
                 HStack(spacing: 12) {
                     ProgressView()
@@ -185,7 +191,247 @@ struct TripView: View {
                 Label("Before your first shot, wipe your lens. A smudge softens every shot.", systemImage: "sparkles")
                     .font(.subheadline)
             }
+        } footer: {
+            // One literal, so the symbols show as pictures.
+            Text("\(Image(systemName: "checkmark.circle.fill")) confirmed usable · \(Image(systemName: "checkmark.circle")) counts for now (passed its check) · \(Image(systemName: "exclamationmark.triangle.fill")) doesn't count yet. Light, everyday and full build on each other: stop whenever you're happy.")
         }
+    }
+
+    // MARK: Coverage
+
+    /// "Light day 10/10 ✓ · Everyday 14/22 · Full day 18/30", from the same takes.
+    private func coverageLine(_ trip: Trip, day number: Int) -> some View {
+        let coverage = trip.dayCoverage(number)
+        let parts = CoverageLevel.allCases.map { level -> String in
+            let done = coverage.done(level)
+            let target = coverage.target(level)
+            return "\(level.title) \(done)/\(target)" + (target > 0 && done >= target ? " ✓" : "")
+        }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(parts.joined(separator: " · "))
+                .foregroundStyle(.secondary)
+            if coverage.confirmed > 0 {
+                Text("\(coverage.confirmed) confirmed usable")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// The next useful thing to film, one tap away: establish a new place when you've moved on, otherwise the first
+    /// row the lowest unfinished level still needs, in the order of the day.
+    @ViewBuilder
+    private func nextRow(_ trip: Trip, day number: Int) -> some View {
+        let newPlace = !trip.clips(onDay: number).isEmpty && nextClipStartsScene(trip, day: number)
+        let next: ShotSuggestion? = newPlace
+            ? Optional(sceneSuggestion(.establish, trip: trip, day: number))
+            : trip.nextSuggestion(day: number)
+        if let next {
+            Button {
+                activeSlot = next.slot
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(Color.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Next: " + next.title)
+                            .font(.headline)
+                        Text(newPlace ? "A new place: establish it first." : nextHint(next))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            Label("A full day's coverage. Film whatever's worth it.", systemImage: "checkmark.seal.fill")
+                .font(.subheadline)
+                .foregroundStyle(Color.green)
+        }
+    }
+
+    private func nextHint(_ next: ShotSuggestion) -> String {
+        if let role = next.role.flatMap({ next.shot.role(withID: $0) }) {
+            return role.purpose
+        }
+        return next.shot.summary
+    }
+
+    /// What each level still needs, role by role.
+    @ViewBuilder
+    private func missingGroup(_ trip: Trip, day number: Int) -> some View {
+        let coverage = trip.dayCoverage(number)
+        if !coverage.complete(.full) {
+            DisclosureGroup {
+                ForEach(CoverageLevel.allCases) { level in
+                    let items = trip.missing(level, day: number)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(items.isEmpty ? "\(level.title): covered"
+                             : "\(level.title): \(coverage.target(level) - coverage.done(level)) to go")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(items.isEmpty ? Color.green : Color.primary)
+                        ForEach(items) { item in
+                            Text(item.line)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            } label: {
+                Text("What's still missing")
+                    .font(.subheadline)
+            }
+        }
+    }
+
+    // MARK: Scenes
+
+    /// Whether your next clip would start a new scene: your choice if you made one, otherwise the app's suggestion
+    /// from where you are now and when you filmed last.
+    private func nextClipStartsScene(_ trip: Trip, day number: Int) -> Bool {
+        if let choice = trip.nextScene, choice.day == number {
+            return choice.startsNew
+        }
+        let coordinate = location.location?.coordinate
+        return trip.suggestsNewScene(day: number, latitude: coordinate?.latitude, longitude: coordinate?.longitude, at: Date())
+    }
+
+    @ViewBuilder
+    private func sceneSection(_ trip: Trip) -> some View {
+        let number = dayNumber(trip)
+        let scenes = trip.scenes(onDay: number)
+        if let current = scenes.last {
+            Section {
+                sceneStatusRow(trip, day: number, current: current)
+                sceneCard(current, trip: trip, day: number, isCurrent: true, isFirst: scenes.count == 1)
+                ForEach(Array(scenes.dropLast().reversed())) { scene in
+                    sceneCard(scene, trip: trip, day: number, isCurrent: false, isFirst: scene.number == scenes.first?.number)
+                }
+            } header: {
+                Text("Scene coverage")
+            } footer: {
+                Text("A scene is the clips from one place, so each can tell a short story. The app suggests them from "
+                    + "distance and time. Merge, split or confirm them whenever you like: they never change the day's counts.")
+            }
+        }
+    }
+
+    /// What happens to the next clip, with the one tap to change it.
+    @ViewBuilder
+    private func sceneStatusRow(_ trip: Trip, day number: Int, current: ClipScene) -> some View {
+        let choice = trip.nextScene?.day == number ? trip.nextScene : nil
+        let startsNew = nextClipStartsScene(trip, day: number)
+        VStack(alignment: .leading, spacing: 6) {
+            if let choice {
+                Label(choice.startsNew ? "Your next clip starts a new scene." : "Your next clip stays in \(current.name).",
+                      systemImage: "hand.point.up.left.fill")
+                    .font(.subheadline)
+                Button("Undo") {
+                    store.setNextScene(nil, day: number, tripID: tripID)
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline.weight(.semibold))
+            } else if startsNew {
+                Label("Looks like a new place: your next clip will start a new scene.", systemImage: "location.fill")
+                    .font(.subheadline)
+                Button("Keep it in \(current.name)") {
+                    store.setNextScene(false, day: number, tripID: tripID)
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline.weight(.semibold))
+            } else {
+                Label("Filming at \(current.name).", systemImage: "location.fill")
+                    .font(.subheadline)
+                Button("Start a new scene with the next clip") {
+                    store.setNextScene(true, day: number, tripID: tripID)
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline.weight(.semibold))
+            }
+        }
+    }
+
+    private func sceneCard(_ scene: ClipScene, trip: Trip, day number: Int, isCurrent: Bool, isFirst: Bool) -> some View {
+        let have = scene.ingredients
+        let count = scene.clips.count
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(scene.name)
+                        .font(.headline)
+                    Text("\(count) \(count == 1 ? "clip" : "clips") · \(have.count) of 5 · "
+                        + (scene.confirmed ? "confirmed" : "suggested"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !scene.confirmed || !isFirst {
+                    Menu {
+                        if !scene.confirmed {
+                            Button("Looks right") {
+                                store.confirmScene(scene.number, day: number, tripID: tripID)
+                            }
+                        }
+                        if !isFirst {
+                            Button("Merge with the scene before") {
+                                store.mergeScene(scene.number, day: number, tripID: tripID)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            FlowLayout(spacing: 6) {
+                ForEach(SceneIngredient.allCases) { ingredient in
+                    if have.contains(ingredient) {
+                        ingredientChip(ingredient.title, symbol: "checkmark.circle.fill", colour: .green)
+                    } else if isCurrent {
+                        let suggestion = sceneSuggestion(ingredient, trip: trip, day: number)
+                        Button {
+                            activeSlot = suggestion.slot
+                        } label: {
+                            ingredientChip("\(ingredient.title): \(suggestion.title)", symbol: "circle", colour: .orange)
+                        }
+                        .buttonStyle(.borderless)
+                    } else {
+                        ingredientChip(ingredient.title, symbol: "circle", colour: .secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func ingredientChip(_ text: String, symbol: String, colour: Color) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(colour.opacity(0.12), in: Capsule())
+            .foregroundStyle(colour)
+    }
+
+    /// The shot for a missing part of a scene's story: the first one the day still needs a role or take of, or
+    /// else the first, as an extra that's new for this place.
+    private func sceneSuggestion(_ ingredient: SceneIngredient, trip: Trip, day number: Int) -> ShotSuggestion {
+        for candidate in ingredient.suggestions {
+            let coverage = trip.coverage(for: ShotSlot(shot: candidate.shot, half: nil), day: number)
+            if let role = candidate.role {
+                if coverage.openRoleIDs.contains(role) {
+                    return candidate
+                }
+            } else if !coverage.complete {
+                return candidate
+            }
+        }
+        return ingredient.suggestions[0]
     }
 
     private func regionText(_ trip: Trip, day: TripDay) -> String {
@@ -438,40 +684,109 @@ struct TripView: View {
     private func slotRow(_ slot: ShotSlot, trip: Trip, day: Int) -> some View {
         let shot = slot.shot
         let type = trip.day(day).type
-        let count = slot.takeCount(in: trip, day: day)
-        let target = slot.target(for: type)
+        let coverage = trip.coverage(for: slot, day: day)
         let summary = slot.summary(for: type)
-        let counts = slot.counts(for: type)
-        let done = count >= target
-        return Button {
-            activeSlot = slot
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: shot.defaultGroup == .inShot ? "person.fill" : "hand.raised.fill")
-                    .frame(width: 28)
-                    .foregroundStyle(Color.orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(slot.title)
-                        .font(.headline)
-                    Text(counts ? summary : summary + " · extra")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    if shot != .voiceover {
-                        FilmingTag(filming: shot.filming, mount: shot.mountSummary)
-                            .padding(.top, 1)
+        let tierLabel = slot.tier(for: type).label
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                activeSlot = slot
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: shot.defaultGroup == .inShot ? "person.fill" : "hand.raised.fill")
+                        .frame(width: 28)
+                        .foregroundStyle(Color.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(slot.title)
+                            .font(.headline)
+                        Text(tierLabel.map { summary + " · " + $0 } ?? summary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        if shot != .voiceover {
+                            FilmingTag(filming: shot.filming, mount: shot.mountSummary)
+                                .padding(.top, 1)
+                        }
                     }
+                    Spacer()
+                    progressBadge(coverage)
                 }
-                Spacer()
-                Text("\(count)/\(target)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(done ? Color.green : Color.secondary)
-                if done {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(Color.green)
-                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if !coverage.roles.isEmpty {
+                roleChips(coverage, slot: slot)
             }
         }
         .foregroundStyle(Color.primary)
+    }
+
+    /// "2/3", a tick once it's covered (filled once every take that counts is confirmed), and any extras or takes
+    /// that don't count.
+    private func progressBadge(_ coverage: SlotCoverage) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            HStack(spacing: 4) {
+                Text("\(coverage.done)/\(coverage.target)")
+                    .font(.subheadline.monospacedDigit())
+                if coverage.complete {
+                    Image(systemName: coverage.fullyConfirmed ? "checkmark.circle.fill" : "checkmark.circle")
+                }
+            }
+            .foregroundStyle(coverage.complete ? Color.green : Color.secondary)
+            if coverage.extras > 0 {
+                Text("+\(coverage.extras) extra")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if coverage.retakes > 0 {
+                Text("\(coverage.retakes) not counted")
+                    .font(.caption2)
+                    .foregroundStyle(Color.orange)
+            }
+        }
+    }
+
+    /// One chip per creative role: tap to film that role.
+    private func roleChips(_ coverage: SlotCoverage, slot: ShotSlot) -> some View {
+        FlowLayout(spacing: 6) {
+            ForEach(coverage.roles) { line in
+                Button {
+                    activeSlot = ShotSlot(shot: slot.shot, half: slot.half, role: line.role.id)
+                } label: {
+                    roleChip(line)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.leading, 40)
+    }
+
+    private func roleChip(_ line: SlotCoverage.RoleLine) -> some View {
+        let symbol: String
+        let colour: Color
+        if line.confirmed > 0 {
+            symbol = "checkmark.circle.fill"
+            colour = .green
+        } else if line.covered {
+            symbol = "checkmark.circle"
+            colour = .green
+        } else if line.retakes > 0 {
+            symbol = "exclamationmark.triangle.fill"
+            colour = .orange
+        } else if line.role.isSubstitute {
+            symbol = "arrow.triangle.swap"
+            colour = .secondary
+        } else if line.role.isOptional {
+            symbol = "plus.circle"
+            colour = .secondary
+        } else {
+            symbol = "circle"
+            colour = .secondary
+        }
+        return Label(line.role.title, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(colour.opacity(0.12), in: Capsule())
+            .foregroundStyle(colour)
     }
 
     /// Before a trip leaves the phone, make the cutouts and captions the editor needs. Clips already done are skipped.

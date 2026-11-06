@@ -5,7 +5,7 @@ struct TimingControls: View {
     @Binding var timing: ShotTiming
 
     static let countdownSteps: [Double] = [0, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300, 600]
-    static let lengthSteps: [Double] = [3, 5, 6, 8, 10, 12, 15, 20, 25, 30, 45, 60, 90, 120, 180, 300, 600, 900, 1200, 1800, 3600]
+    static let lengthSteps: [Double] = [3, 5, 6, 8, 10, 12, 15, 20, 25, 30, 35, 40, 45, 60, 90, 120, 180, 300, 600, 900, 1200, 1800, 3600]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {

@@ -23,6 +23,10 @@ struct ReviewView: View {
     @State private var suggested: Set<String> = []
     @State private var selected: Set<String> = []
     @State private var favourite = false
+    /// Your verdict: Usable (or Use anyway), Not usable, or not checked yet.
+    @State private var usableChoice: Bool? = nil
+    /// The creative role, for shots with roles.
+    @State private var roleChoice: String? = nil
     @State private var notes = ""
     @State private var name = ""
     @State private var shotName = ""
@@ -62,6 +66,7 @@ struct ReviewView: View {
                     media
                     gradedCopySection
                     checkSection
+                    coverageSection
                     nameSection
                     if clip?.isAdded == true {
                         shotPicker
@@ -96,6 +101,9 @@ struct ReviewView: View {
                 player?.pause()
                 save()
             }
+            .onChange(of: favourite) { _, _ in saveCoverageChoices() }
+            .onChange(of: usableChoice) { _, _ in saveCoverageChoices() }
+            .onChange(of: roleChoice) { _, _ in saveCoverageChoices() }
             .confirmationDialog("Delete this take?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
                     deleted = true
@@ -214,6 +222,136 @@ struct ReviewView: View {
             Label(check, systemImage: passed ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(passed ? Color.green : Color.orange)
+        }
+    }
+
+    // MARK: Coverage
+
+    /// The take's creative role, whether it counts, and the choice to confirm it or use it anyway. Never required:
+    /// a take that passed its check counts for now without any of this.
+    @ViewBuilder
+    private var coverageSection: some View {
+        if let clip, let type = clip.shotType, !clip.isPhoto {
+            VStack(alignment: .leading, spacing: 10) {
+                if !type.roles.isEmpty {
+                    roleRow(type)
+                }
+                Picker("Usable?", selection: $usableChoice) {
+                    Text("Not checked").tag(Bool?.none)
+                    Text(clip.technicallyAcceptable ? "Usable" : "Use anyway").tag(Bool?.some(true))
+                    Text("Not usable").tag(Bool?.some(false))
+                }
+                .pickerStyle(.segmented)
+                Text(coverageNote(clip))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                sceneRow(clip)
+            }
+        }
+    }
+
+    private func roleRow(_ type: ShotType) -> some View {
+        let current = roleChoice.flatMap { type.role(withID: $0) }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Role")
+                    .font(.headline)
+                Spacer()
+                if type.rolesAreVariants {
+                    Text(current?.title ?? "Not set")
+                        .fontWeight(.semibold)
+                } else {
+                    Menu {
+                        ForEach(type.roles) { role in
+                            Button(role.title) {
+                                roleChoice = role.id
+                            }
+                        }
+                    } label: {
+                        Text(current?.title ?? "Not set")
+                            .fontWeight(.semibold)
+                    }
+                }
+            }
+            if let current {
+                Text(current.purpose)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// What the take does for coverage, with the choices as they are on screen.
+    private func coverageNote(_ clip: Clip) -> String {
+        var preview = clip
+        preview.usable = usableChoice
+        preview.favourite = favourite
+        if usableChoice == false {
+            return "Marked not usable, so it doesn't count."
+        }
+        if !preview.countsAsCoverage {
+            let reason = clip.checkPassed == false ? (clip.check ?? "It failed the take check") : "It stopped well short"
+            return "\(reason), so it doesn't count. Choose Use anyway if it's still good for the edit."
+        }
+        if preview.confirmedUsable {
+            if usableChoice == true && !clip.technicallyAcceptable {
+                return "Used anyway: it counts, whatever the take check said."
+            }
+            return "Confirmed usable: it counts."
+        }
+        return "Counts for now: it passed its checks. Mark it Usable once you've watched it, or star it as the best take."
+    }
+
+    /// Which scene the clip is in, with moving it, starting a new scene from it, or confirming it.
+    @ViewBuilder
+    private func sceneRow(_ clip: Clip) -> some View {
+        if let trip = store.trip(id: tripID) {
+            let scenes = trip.scenes(onDay: clip.dayNumber)
+            let number = trip.sceneNumbers(onDay: clip.dayNumber)[clip.id]
+            let current = scenes.first(where: { $0.number == number })
+            HStack {
+                Text("Scene")
+                    .font(.headline)
+                Spacer()
+                Menu {
+                    ForEach(scenes) { scene in
+                        if scene.number != number {
+                            Button("Move to \(scene.name)") {
+                                store.moveClip(clip.id, toScene: scene.number, tripID: tripID)
+                            }
+                        }
+                    }
+                    Button("Start a new scene from this clip") {
+                        store.splitScene(at: clip.id, tripID: tripID)
+                    }
+                    if clip.sceneConfirmed != true, let number {
+                        Button("Looks right") {
+                            store.moveClip(clip.id, toScene: number, tripID: tripID)
+                        }
+                    }
+                } label: {
+                    Text((current?.name ?? "None") + (clip.sceneConfirmed == true ? "" : " · suggested"))
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    /// Saves the coverage choices straight away, so the camera sees them as soon as the review closes.
+    private func saveCoverageChoices() {
+        guard loaded, !deleted, let original = clip else { return }
+        var updated = original
+        applyCoverageChoices(to: &updated, original: original)
+        if updated != original {
+            store.updateClip(updated, in: tripID)
+        }
+    }
+
+    private func applyCoverageChoices(to updated: inout Clip, original: Clip) {
+        updated.favourite = favourite
+        updated.usable = usableChoice
+        if let roleChoice, roleChoice != original.roleID {
+            updated.role = roleChoice
         }
     }
 
@@ -384,6 +522,8 @@ struct ReviewView: View {
         loaded = true
         selected = Set(clip.tags)
         favourite = clip.favourite
+        usableChoice = clip.usable
+        roleChoice = clip.roleID
         notes = clip.notes
         name = clip.name ?? ""
         shotName = clip.shot
@@ -421,7 +561,7 @@ struct ReviewView: View {
         guard !deleted, let original = clip else { return }
         var updated = original
         updated.tags = tagLibrary.ordered(selected)
-        updated.favourite = favourite
+        applyCoverageChoices(to: &updated, original: original)
         updated.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.name = trimmedName.isEmpty ? nil : trimmedName

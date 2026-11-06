@@ -12,6 +12,8 @@ struct ShotCameraView: View {
     let day: Int
     /// Opened from a transition's Out or In row: stick to that half for every take.
     let fixedVariant: Int?
+    /// The creative role tapped on the trip page, if one was.
+    let initialRole: String?
 
     @EnvironmentObject var store: TripStore
     @EnvironmentObject var location: LocationService
@@ -24,6 +26,10 @@ struct ShotCameraView: View {
 
     @State private var inShot: Bool
     @State private var variant = 0
+    /// The creative role being filmed, for shots with roles (REVEAL's is its version).
+    @State private var roleID: String? = nil
+    /// The take just saved, to see what it did for coverage once its review closes.
+    @State private var lastClipID: UUID? = nil
     @State private var take = 1
     @State private var showBriefing: Bool
     @State private var timing = ShotTiming(countdown: 5, stopsByItself: true, length: 10)
@@ -69,13 +75,15 @@ struct ShotCameraView: View {
     /// Ticks every 30 seconds, to notice golden and blue hour starting and ending while the camera is open.
     private let lightClock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
-    init(tripID: UUID, shot: ShotType, day: Int, fixedVariant: Int? = nil) {
+    init(tripID: UUID, shot: ShotType, day: Int, fixedVariant: Int? = nil, role: String? = nil) {
         self.tripID = tripID
         self.shot = shot
         self.day = day
         self.fixedVariant = fixedVariant
-        _inShot = State(initialValue: shot.defaultGroup == .inShot)
-        _showBriefing = State(initialValue: shot.defaultGroup == .inShot || !HowItWorks.seen(shot))
+        self.initialRole = role
+        let tapped = role.flatMap { shot.role(withID: $0) }
+        _inShot = State(initialValue: tapped?.inShot ?? (shot.defaultGroup == .inShot))
+        _showBriefing = State(initialValue: shot.defaultGroup == .inShot || !HowItWorks.seen(shot, role: role))
     }
 
     /// The day's trip type, which tunes the takes, the tips and, for snow, the brightness.
@@ -89,7 +97,7 @@ struct ShotCameraView: View {
     }
 
     private var plan: ShotPlan {
-        var plan = shot.plan(take: take, inShot: inShot, variant: variant)
+        var plan = shot.plan(take: take, inShot: inShot, variant: variant, role: roleID)
         // 60 fps lets an edit slow movement down, but it needs light. Once the sun is down, 30 fps looks better.
         if lowLight && plan.fps == 60 {
             plan.fps = 30
@@ -129,8 +137,85 @@ struct ShotCameraView: View {
         if fixedVariant != nil, let half = plan.variantName {
             return shot.isTransition ? "\(half) half" : half.lowercased()
         }
+        if let role = currentRole {
+            return "\(role.title) · take \(take)"
+        }
         let target = tripType.target(for: shot)
         return take > target ? "extra take \(take)" : "take \(take) of \(target)"
+    }
+
+    /// The creative role being filmed: picked with the role buttons, or REVEAL's version.
+    private var currentRole: CoverageRole? {
+        fixedVariant == nil ? plan.role : nil
+    }
+
+    /// This shot's progress today, for shots with roles.
+    private var shotCoverage: SlotCoverage? {
+        guard !shot.roles.isEmpty, fixedVariant == nil else { return nil }
+        return store.trip(id: tripID)?.coverage(for: ShotSlot(shot: shot, half: nil), day: day)
+    }
+
+    /// How to hold the phone for this take: the shot's way, unless the role changes it (WIDE's vertical hero).
+    private var filming: Filming {
+        plan.filming ?? shot.filming
+    }
+
+    /// Switches to a role: REVEAL's version, or the role's own plan. Roles you're in, or not, by their nature set
+    /// "I'm in this shot" to match.
+    private func selectRole(_ id: String) {
+        guard let role = shot.role(withID: id) else { return }
+        if shot.rolesAreVariants {
+            if let index = shot.roles.firstIndex(where: { $0.id == id }) {
+                variant = index
+            }
+        } else {
+            roleID = id
+        }
+        if let fixed = role.inShot {
+            inShot = fixed
+        }
+    }
+
+    /// The role to start on: the one tapped on the trip page, or the next one the day still needs.
+    private func chooseStartingRole() {
+        guard !shot.roles.isEmpty, fixedVariant == nil else { return }
+        if let initialRole, shot.role(withID: initialRole) != nil {
+            selectRole(initialRole)
+        } else if let next = shot.nextRole(after: nil, open: shotCoverage?.openRoleIDs ?? []) {
+            selectRole(next.id)
+        }
+    }
+
+    /// The role buttons, with a tick on the ones today already has. Swap-ins come after the usual roles.
+    private var rolePicker: some View {
+        let lines = shotCoverage?.roles ?? []
+        let current = currentRole?.id
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(lines) { line in
+                    Button {
+                        selectRole(line.role.id)
+                    } label: {
+                        HStack(spacing: 4) {
+                            if line.covered {
+                                Image(systemName: "checkmark")
+                            } else if line.role.isSubstitute {
+                                Image(systemName: "arrow.triangle.swap")
+                            } else if line.role.isOptional {
+                                Image(systemName: "plus")
+                            }
+                            Text(line.role.title)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(line.role.id == current ? Color.orange : Color.black.opacity(0.5), in: Capsule())
+                        .foregroundStyle(line.role.id == current ? Color.black : Color.white)
+                    }
+                }
+            }
+            .padding(.horizontal, 2)
+        }
     }
 
     /// Heat and battery, shown above the camera controls when they could cut a take short.
@@ -307,6 +392,7 @@ struct ShotCameraView: View {
             }
             .onChange(of: inShot) { _, _ in planChanged() }
             .onChange(of: variant) { _, _ in planChanged() }
+            .onChange(of: roleID) { _, _ in planChanged() }
             .onChange(of: take) { _, _ in planChanged() }
             .sheet(item: $reviewClip, onDismiss: reviewDismissed) { clip in
                 ReviewView(
@@ -416,14 +502,16 @@ struct ShotCameraView: View {
 
     private var optionsRow: some View {
         VStack(spacing: 8) {
-            if shot.canToggleInShot {
+            if shot.canToggleInShot && currentRole?.inShot == nil {
                 Toggle("I'm in this shot", isOn: $inShot)
                     .tint(.orange)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
                     .background(Color.black.opacity(0.5), in: Capsule())
             }
-            if !shot.variants.isEmpty && fixedVariant == nil {
+            if !shot.roles.isEmpty && fixedVariant == nil {
+                rolePicker
+            } else if !shot.variants.isEmpty && fixedVariant == nil {
                 Picker("Version", selection: $variant) {
                     ForEach(shot.variants.indices, id: \.self) { index in
                         Text(shot.variants[index]).tag(index)
@@ -497,7 +585,7 @@ struct ShotCameraView: View {
 
     /// Whether the phone is held the way this shot is filmed.
     private var heldRight: Bool {
-        switch shot.filming {
+        switch filming {
         case .landscape: return level.hold.isSideways
         case .portrait: return !level.hold.isSideways
         case .either: return true
@@ -509,7 +597,7 @@ struct ShotCameraView: View {
     private var holdBanner: some View {
         if !heldRight && camera.phase == .ready && countdownRemaining == nil && reviewClip == nil && !permissionDenied
             && !showBriefing {
-            let landscape = shot.filming == .landscape
+            let landscape = filming == .landscape
             VStack(spacing: 10) {
                 Image(systemName: landscape ? "iphone.landscape" : "iphone")
                     .font(.system(size: 48))
@@ -535,7 +623,7 @@ struct ShotCameraView: View {
         let text: String
         let symbol: String
         let colour: Color
-        switch shot.filming {
+        switch filming {
         case .landscape:
             text = landscapeNow ? "Landscape" : "Turn to landscape"
             symbol = landscapeNow ? "checkmark.circle.fill" : "iphone.landscape"
@@ -556,7 +644,7 @@ struct ShotCameraView: View {
 
     /// The card's first setup line: which way to hold the phone and what it goes on, like "Landscape, on the tripod."
     private var filmingNote: some View {
-        let filming = shot.filming
+        let filming = self.filming
         return Label("\(filming.cardTitle), \(plan.mount.phrase).", systemImage: filming.symbol)
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(filming == .either ? Color.white : filming.colour)
@@ -801,7 +889,18 @@ struct ShotCameraView: View {
                                 .background(Color.white.opacity(0.12), in: Circle())
                         }
                     }
-                    if !shot.variants.isEmpty && fixedVariant == nil {
+                    if let message {
+                        Label(message, systemImage: "info.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.orange)
+                    }
+                    if !shot.roles.isEmpty && fixedVariant == nil {
+                        rolePicker
+                        if let role = currentRole {
+                            Text(role.purpose)
+                                .foregroundStyle(Color.white.opacity(0.85))
+                        }
+                    } else if !shot.variants.isEmpty && fixedVariant == nil {
                         Picker("Version", selection: $variant) {
                             ForEach(shot.variants.indices, id: \.self) { index in
                                 Text(shot.variants[index]).tag(index)
@@ -847,7 +946,7 @@ struct ShotCameraView: View {
                         }
                         .tint(.orange)
                     }
-                    if shot.canToggleInShot {
+                    if shot.canToggleInShot && currentRole?.inShot == nil {
                         Toggle("I'm in this shot", isOn: $inShot)
                             .tint(.orange)
                     }
@@ -859,7 +958,7 @@ struct ShotCameraView: View {
                         .foregroundStyle(Color.white.opacity(0.7))
                     Button {
                         showBriefing = false
-                        HowItWorks.markSeen(shot)
+                        HowItWorks.markSeen(shot, role: currentRole?.id)
                     } label: {
                         Text(plan.isInShot ? "Set up the shot" : "Got it")
                             .font(.headline)
@@ -932,8 +1031,9 @@ struct ShotCameraView: View {
         }
         take = store.nextTake(tripID: tripID, shot: shot, day: day)
         variant = variantFor(take: take)
+        chooseStartingRole()
         timing = TimingStore.load(shot, plan: plan)
-        showBriefing = plan.isInShot || !HowItWorks.seen(shot)
+        showBriefing = plan.isInShot || !HowItWorks.seen(shot, role: currentRole?.id)
         level.start()
         UIDevice.current.isBatteryMonitoringEnabled = true
         readBattery()
@@ -1079,7 +1179,7 @@ struct ShotCameraView: View {
 
     private func planChanged() {
         timing = TimingStore.load(shot, plan: plan)
-        showBriefing = plan.isInShot || !HowItWorks.seen(shot)
+        showBriefing = plan.isInShot || !HowItWorks.seen(shot, role: currentRole?.id)
         if cameraAllowed {
             camera.configure(plan.captureConfig)
             // Setting the camera up again puts the white balance back on automatic.
@@ -1195,8 +1295,12 @@ struct ShotCameraView: View {
                 songStartAtRecording = song.heardPosition
             }
         }
+        // How long the take is set to run, so a take stopped well short doesn't count as coverage. Time-lapses
+        // are left out: their video is far shorter than the time they run.
+        let planned: Double? = timing.stopsByItself && used.timelapseInterval == nil ? stopTime : nil
         camera.startRecording(to: url, hold: level.hold, latitude: coordinate?.latitude, longitude: coordinate?.longitude) { result in
-            saveTake(result, plan: used, startedAt: now, latitude: coordinate?.latitude, longitude: coordinate?.longitude)
+            saveTake(result, plan: used, startedAt: now, latitude: coordinate?.latitude, longitude: coordinate?.longitude,
+                     plannedLength: planned)
         }
     }
 
@@ -1232,7 +1336,8 @@ struct ShotCameraView: View {
         }
     }
 
-    private func saveTake(_ result: RecordingResult?, plan used: ShotPlan, startedAt: Date, latitude: Double?, longitude: Double?) {
+    private func saveTake(_ result: RecordingResult?, plan used: ShotPlan, startedAt: Date, latitude: Double?, longitude: Double?,
+                          plannedLength: Double?) {
         // Put the zoom back where this shot starts, ready for the next take. MATCH CUT keeps the zoom it was
         // filmed at, so the next one lines up.
         if shot == .matchCut {
@@ -1278,6 +1383,8 @@ struct ShotCameraView: View {
             if shot == .wildlife {
                 tags.append("wildlife")
             }
+            // The scene: the app's suggestion from where and when, or your choice for this clip if you made one.
+            let scene = store.sceneForNewClip(tripID: tripID, day: day, latitude: latitude, longitude: longitude, at: startedAt)
             let clip = Clip(
                 fileName: result.url.lastPathComponent,
                 shot: shot.rawValue,
@@ -1311,8 +1418,13 @@ struct ShotCameraView: View {
                 whiteBalance: settings?.whiteBalance,
                 iso: settings?.iso,
                 shutter: settings?.shutter,
-                orientation: result.sideways ? Clip.landscape : Clip.portrait)
+                orientation: result.sideways ? Clip.landscape : Clip.portrait,
+                role: used.role?.id,
+                scene: scene.scene,
+                sceneConfirmed: scene.confirmed ? true : nil,
+                plannedLength: plannedLength)
             store.addClip(clip, to: tripID)
+            lastClipID = clip.id
             if prefill != nil {
                 // Named after the spot you're still at, so the file gets the name straight away.
                 store.applyFileName(clipID: clip.id, tripID: tripID)
@@ -1391,8 +1503,12 @@ struct ShotCameraView: View {
     }
 
     private func reviewDismissed() {
+        let filmedID = lastClipID
+        lastClipID = nil
         take = store.nextTake(tripID: tripID, shot: shot, day: day)
-        variant = variantFor(take: take)
+        if shot.roles.isEmpty || fixedVariant != nil {
+            variant = variantFor(take: take)
+        }
         reviewNote = nil
         if shot == .dance {
             danceStart = carryOnPoint == nil ? .fromTop : .carryOn
@@ -1408,10 +1524,30 @@ struct ShotCameraView: View {
             }
             return
         }
-        let target = tripType.target(for: shot)
-        if trip.takeCount(of: shot, day: day) >= target {
-            let noun = target == 1 ? "take" : "takes"
-            message = "All \(target) \(noun) done. Film an extra, or tap ✕ to pick the next shot."
+        let coverage = trip.coverage(for: ShotSlot(shot: shot, half: nil), day: day)
+        let filmed = filmedID.flatMap { id in trip.clips.first(where: { $0.id == id }) }
+        if let filmed, !filmed.countsAsCoverage {
+            // Not counted: say why, and stay on the same role for another go.
+            let reason = filmed.usable == false ? "You marked that take not usable"
+                : filmed.checkPassed == false ? (filmed.check ?? "That take failed its check") : "That take stopped early"
+            message = "\(reason), so it doesn't count yet. Film it again, or open it later and choose Use anyway."
+            return
+        }
+        if shot.roles.isEmpty {
+            if coverage.complete {
+                let noun = coverage.target == 1 ? "take" : "takes"
+                message = "All \(coverage.target) \(noun) done. Film an extra, or tap ✕ to pick the next shot."
+            }
+            return
+        }
+        let finished = currentRole?.title
+        if let next = shot.nextRole(after: currentRole?.id, open: coverage.openRoleIDs) {
+            selectRole(next.id)
+            message = (finished.map { "\($0) done. " } ?? "") + "Next: \(next.title)."
+        } else if coverage.complete {
+            let optional = coverage.openOptionalRoles.map { $0.title }
+            let more = optional.isEmpty ? "More takes are welcome as extras" : "Optional: \(optional.joined(separator: ", "))"
+            message = "\(shot.title) is covered for today. \(more), or tap ✕ to pick the next shot."
         }
     }
 
@@ -1426,14 +1562,17 @@ struct ShotCameraView: View {
 /// The How it works card opens by itself for shots you're in, before every take, and for the rest the first
 /// time you open them. The How it works button brings it back any time.
 enum HowItWorks {
-    private static func key(_ shot: ShotType) -> String { "howItWorks.seen." + shot.rawValue }
-
-    static func seen(_ shot: ShotType) -> Bool {
-        UserDefaults.standard.bool(forKey: key(shot))
+    /// Per shot, and per creative role since 1.19, so each role's card shows the first time you film it.
+    private static func key(_ shot: ShotType, role: String?) -> String {
+        "howItWorks.seen." + shot.rawValue + (role.map { ".role." + $0 } ?? "")
     }
 
-    static func markSeen(_ shot: ShotType) {
-        UserDefaults.standard.set(true, forKey: key(shot))
+    static func seen(_ shot: ShotType, role: String? = nil) -> Bool {
+        UserDefaults.standard.bool(forKey: key(shot, role: role))
+    }
+
+    static func markSeen(_ shot: ShotType, role: String? = nil) {
+        UserDefaults.standard.set(true, forKey: key(shot, role: role))
     }
 }
 

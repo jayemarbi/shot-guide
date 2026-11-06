@@ -176,6 +176,10 @@ struct ShotPlan {
     var placement: String? = nil
     /// What the phone is on: the tripod, the gimbal or your hand.
     var mount: Mount = .handheld
+    /// The creative role this take is filmed for, for shots with roles (1.19).
+    var role: CoverageRole? = nil
+    /// How to hold the phone when the role changes it: WIDE's vertical hero is upright. nil is the shot's usual way.
+    var filming: Filming? = nil
 
     var isInShot: Bool { group == .inShot }
 
@@ -254,10 +258,13 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    /// How many takes a day needs. For shots with roles (see Coverage.swift) it's how many different roles: the
+    /// same role filmed twice is an extra, not two.
     var targetTakes: Int {
         switch self {
-        case .reveal, .wide, .walkaway, .moment, .follow, .food, .whip, .wildlife: return 2
-        case .detail, .talk, .onTheWay, .sounds: return 3
+        case .reveal, .walkaway, .moment, .pov, .follow, .food, .whip, .wildlife: return 2
+        case .wide, .talk, .onTheWay, .sounds: return 3
+        case .detail: return 4
         case .bRoll: return 6
         default: return 1
         }
@@ -269,16 +276,11 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// Often filmed inside, where the room's lights set the colour, so golden and blue hour leave them on automatic.
     var oftenIndoors: Bool { self == .food || self == .home || self == .stay }
 
+    /// Whether the shot counts towards a day at all: core and full-day shots do (see `tier` in Coverage.swift).
     /// Extras depend on the day (a partner to follow, food, animals, an interesting trip there, somewhere special
-    /// to stay), so they don't count towards a trip's total. Nor do WHIP, the creative shots and TIMELAPSE, which
-    /// ties the phone up for 10 minutes. MATCH CUT and SILHOUETTE count: the saved reels use them a lot.
+    /// to stay), and the creative shots and TIMELAPSE are there whenever they're worth it.
     var countsTowardTotal: Bool {
-        switch self {
-        case .whip, .follow, .food, .onTheWay, .voiceover, .wildlife, .home, .stay: return false
-        case .clone, .orbit, .hyperlapse, .reflection, .sounds, .dance, .timelapse:
-            return false
-        default: return true
-        }
+        tier != .extra
     }
 
     /// Which way to hold the phone. The big views go sideways, for the cinematic edits; you talking or up close
@@ -343,17 +345,17 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .reaction: return "Your first look at the view"
         case .reveal: return "The view opens up"
         case .timelapse: return "Clouds, light or crowds, sped up"
-        case .wide: return "The whole place and its scale"
+        case .wide: return "The place, you in it, and another angle"
         case .walkaway: return "You walk into the scene"
         case .tele: return "You, small, under something huge"
-        case .moment: return "A real moment together, filmed from the tripod"
+        case .moment: return "Real moments, with the place and together"
         case .follow: return "Being led by the hand towards the view"
         case .onTheWay: return "The trip there: windows, roads, boats"
         case .food: return "Local food, close and slow"
-        case .detail: return "Close-ups and textures"
+        case .detail: return "Four different close-ups"
         case .pov: return "What your eyes see on the way"
         case .talk: return "Talking to camera, on the tripod or walking"
-        case .ambient: return "20 seconds of pure sound"
+        case .ambient: return "30 seconds of pure sound"
         case .slomo: return "Water, waves or a jump in slow motion"
         case .whip: return "Whip pan from one place to the next"
         case .voiceover: return "Your voice, for narration and captions"
@@ -367,16 +369,36 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .sounds: return "Close-ups made for their sound"
         case .wildlife: return "Animals up close, on the 5x"
         case .home: return "Before you go and after you're back"
-        case .bRoll: return "5 seconds of anything that shows the place"
+        case .bRoll: return "Six different kinds of footage that show the place"
         case .stay: return "Walking into where you're staying"
         }
     }
 
-    func plan(take: Int, inShot: Bool, variant: Int) -> ShotPlan {
-        var plan = basePlan(take: take, inShot: inShot, variant: variant)
+    /// The plan for a take. `role` is one of the shot's creative roles; nil picks its usual one (for WIDE, the
+    /// one that matches `inShot`). REVEAL's role is its version.
+    func plan(take: Int, inShot: Bool, variant: Int, role: String? = nil) -> ShotPlan {
+        var plan = basePlan(take: take, inShot: inShot, variant: variant, role: role)
+        if rolesAreVariants {
+            let index = variants.isEmpty ? 0 : min(max(variant, 0), variants.count - 1)
+            plan.role = index < roles.count ? roles[index] : nil
+        } else {
+            plan.role = resolvedRole(role, inShot: inShot)
+        }
         plan.placement = placement(for: plan)
         plan.mount = mount(for: plan)
         return plan
+    }
+
+    /// The role a take is filmed for: the one asked for if it's one of this shot's, otherwise the usual one.
+    func resolvedRole(_ id: String?, inShot: Bool) -> CoverageRole? {
+        guard !roles.isEmpty else { return nil }
+        if let id, let match = role(withID: id) {
+            return match
+        }
+        if self == .wide {
+            return role(withID: inShot ? "human-scale" : "establishing")
+        }
+        return roles.first
     }
 
     /// What the phone goes on: the tripod for still shots, the gimbal for smooth moving ones, your hand for the rest.
@@ -423,9 +445,11 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .reaction:
             return "Arm's length, your face in the top half of the frame. As you turn, the view comes in behind you."
         case .wide:
-            return plan.isInShot
-                ? "Small, on the left or right third line and low in the frame, with your back to the lens, looking out at the view."
-                : nil
+            guard plan.isInShot else { return nil }
+            if plan.role?.id == "vertical-hero" {
+                return "Small, in the lower half of the upright frame and near the middle, with the view rising above you."
+            }
+            return "Small, on the left or right third line and low in the frame, with your back to the lens, looking out at the view."
         case .walkaway:
             return "Start just beside the phone, out of shot. Walk straight away from it into the view and stop on a third "
                 + "line, small against it."
@@ -557,16 +581,18 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    private func basePlan(take: Int, inShot: Bool, variant: Int) -> ShotPlan {
+    private func basePlan(take: Int, inShot: Bool, variant: Int, role: String?) -> ShotPlan {
         let variantIndex = variants.isEmpty ? 0 : min(max(variant, 0), variants.count - 1)
         let variantName: String? = variants.isEmpty ? nil : variants[variantIndex]
+        // The role's id, or "" for shots without roles (and REVEAL, whose role is its version).
+        let roleID = rolesAreVariants ? "" : (resolvedRole(role, inShot: inShot)?.id ?? "")
 
         switch self {
         case .reaction:
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .front, fps: 30, stabilisation: .standard,
-                autoStop: nil, manualLength: 40, countdown: 3,
+                autoStop: nil, manualLength: 30, countdown: 3,
                 before: "Front camera at arm's length. Start before you can see the view.",
                 steps: [
                     GuideStep(start: 0, end: 10, text: "Walk up. Don't look at the view yet."),
@@ -630,75 +656,150 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 variantName: "1 frame a second")
 
         case .wide:
-            let lens: LensChoice = take % 2 == 0 ? .wide : .ultraWide
-            if inShot {
+            switch roleID {
+            case "human-scale":
                 return ShotPlan(
                     shot: self, take: take, group: .inShot,
-                    lens: lens, fps: 30, stabilisation: .off,
-                    autoStop: 12, countdown: 10,
-                    before: "Tripod. Use the 10-second countdown to walk to your spot, and stand small in the frame.",
+                    lens: .ultraWide, fps: 30, stabilisation: .off,
+                    autoStop: 30, countdown: 10,
+                    before: "Tripod. Use the 10-second countdown to walk to your spot, small in the frame. On your own or "
+                        + "together.",
                     steps: [
-                        GuideStep(start: 0, end: 10, text: "Stand still and look out at the view."),
-                        GuideStep(start: 10, end: 12, text: "Hold.")
+                        GuideStep(start: 0, end: 5, text: "Stand still and look out at the view."),
+                        GuideStep(start: 5, end: 25, text: "Do something natural: walk a few steps, look around, sit, point something out."),
+                        GuideStep(start: 25, end: 30, text: "Hold still.")
+                    ])
+            case "alternative":
+                if inShot {
+                    return ShotPlan(
+                        shot: self, take: take, group: .inShot,
+                        lens: .wide, fps: 30, stabilisation: .off,
+                        autoStop: 25, countdown: 10,
+                        before: "Tripod somewhere new: higher, lower, further back or the other side, at 1x. Walk to your "
+                            + "spot in the countdown.",
+                        steps: [
+                            GuideStep(start: 0, end: 5, text: "Get into your spot and look out."),
+                            GuideStep(start: 5, end: 20, text: "Let the scene play: move a little, look around."),
+                            GuideStep(start: 20, end: 25, text: "Hold still.")
+                        ])
+                }
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 25,
+                    before: "Move before you film: higher, lower, further back or the other side. Or switch lens. If "
+                        + "something's happening, like clouds moving or people passing, let it run longer, up to a minute.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Frame it and brace your elbows."),
+                        GuideStep(start: 2, end: 23, text: "Hold still and let the scene develop."),
+                        GuideStep(start: 23, end: 25, text: "Keep holding.")
+                    ])
+            case "vertical-hero":
+                if inShot {
+                    return ShotPlan(
+                        shot: self, take: take, group: .inShot,
+                        lens: .ultraWide, fps: 30, stabilisation: .off,
+                        autoStop: 20, countdown: 10,
+                        before: "Phone upright on the tripod. Walk to your spot in the countdown, small in the lower half of "
+                            + "the frame.",
+                        steps: [
+                            GuideStep(start: 0, end: 5, text: "Stand still, facing the view."),
+                            GuideStep(start: 5, end: 18, text: "Hold, or move slowly. Stay near the middle."),
+                            GuideStep(start: 18, end: 20, text: "Hold still.")
+                        ],
+                        filming: .portrait)
+                }
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .ultraWide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 20,
+                    before: "Hold the phone upright. Horizon on the bottom third, the top third for sky and a title. Keep "
+                        + "what matters near the middle: on TikTok and Reels, captions and buttons cover the bottom and "
+                        + "right edges.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Frame it upright and brace."),
+                        GuideStep(start: 2, end: 18, text: "Hold the frame. No panning."),
+                        GuideStep(start: 18, end: 20, text: "Keep holding.")
+                    ],
+                    filming: .portrait)
+            default:
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .ultraWide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 20,
+                    before: "Show the whole place and its scale, with no one in it. Leave sky above for a title, and find "
+                        + "something interesting for the foreground. A tripod helps.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Brace your elbows, or settle the tripod."),
+                        GuideStep(start: 2, end: 18, text: "Hold the frame. No panning. Let the place breathe."),
+                        GuideStep(start: 18, end: 20, text: "Keep holding.")
+                    ])
+            }
+
+        case .walkaway:
+            if roleID == "new-spot" {
+                return ShotPlan(
+                    shot: self, take: take, group: .inShot,
+                    lens: .ultraWide, fps: 60, stabilisation: .off,
+                    autoStop: 20, countdown: 5,
+                    before: "Somewhere different from your first walk: a new path, a closer frame or another direction. "
+                        + "Tripod at knee or hip height. This time, add an action: look back over your shoulder, take "
+                        + "your partner's hand or stop right at the edge.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Empty frame. You're just out of shot beside the phone."),
+                        GuideStep(start: 2, end: 10, text: "Walk in and keep going."),
+                        GuideStep(start: 10, end: 14, text: "Stop and look out at the view."),
+                        GuideStep(start: 14, end: 20, text: "Your action: look back over your shoulder, or reach for their hand.")
                     ])
             }
             return ShotPlan(
-                shot: self, take: take, group: .inHand,
-                lens: lens, fps: 30, stabilisation: .cinematic,
-                autoStop: 12,
-                before: lens == .ultraWide ? "Show the whole place and its scale." : "Same again at 1x.",
-                steps: [
-                    GuideStep(start: 0, end: 2, text: "Brace your elbows."),
-                    GuideStep(start: 2, end: 10, text: "Hold the frame. No panning."),
-                    GuideStep(start: 10, end: 12, text: "Keep holding.")
-                ])
-
-        case .walkaway:
-            let lookBack = take % 2 == 0
-            return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .ultraWide, fps: 60, stabilisation: .off,
-                autoStop: 16, countdown: 5,
-                before: lookBack
-                    ? "Tripod at knee or hip height. This take, look back over your shoulder."
-                    : "Tripod at knee or hip height.",
-                steps: lookBack
-                    ? [
-                        GuideStep(start: 0, end: 2, text: "Empty frame. You're just out of shot beside the phone."),
-                        GuideStep(start: 2, end: 10, text: "Walk in and keep going."),
-                        GuideStep(start: 10, end: 12, text: "Stop and look out at the view."),
-                        GuideStep(start: 12, end: 16, text: "Look back over your shoulder at the lens.")
-                    ]
-                    : [
-                        GuideStep(start: 0, end: 2, text: "Empty frame. You're just out of shot beside the phone."),
-                        GuideStep(start: 2, end: 10, text: "Walk in and keep going. Don't look back."),
-                        GuideStep(start: 10, end: 14, text: "Stop and look out at the view."),
-                        GuideStep(start: 14, end: 16, text: "Hold still.")
-                    ])
+                autoStop: 20, countdown: 5,
+                before: "Tripod at knee or hip height, with a path or ridge leading into the view.",
+                steps: [
+                    GuideStep(start: 0, end: 2, text: "Empty frame. You're just out of shot beside the phone."),
+                    GuideStep(start: 2, end: 12, text: "Walk in and keep going. Don't look back."),
+                    GuideStep(start: 12, end: 17, text: "Stop and look out at the view."),
+                    GuideStep(start: 17, end: 20, text: "Hold still.")
+                ])
 
         case .tele:
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .tele, fps: 30, stabilisation: .off,
-                autoStop: 20, countdown: 45,
+                autoStop: 25, countdown: 45,
                 before: "Tripod. Use the 45-second countdown to walk 30–50 m out.",
                 steps: [
                     GuideStep(start: 0, end: 10, text: "Stand still, facing the view."),
-                    GuideStep(start: 10, end: 20, text: "Walk slowly across the frame.")
+                    GuideStep(start: 10, end: 25, text: "Walk slowly across the frame.")
                 ])
 
         case .moment:
+            if roleID == "together" {
+                return ShotPlan(
+                    shot: self, take: take, group: .inShot,
+                    lens: .wide, fps: 60, stabilisation: .off,
+                    autoStop: 40, countdown: 10,
+                    before: "Tripod, with the view behind you. Something real together: laughing, a kiss, walking hand in "
+                        + "hand, a slow spin. On your own, a real reaction to the place. It films at 60 fps so the moment "
+                        + "can be slowed down a little.",
+                    steps: [
+                        GuideStep(start: 0, end: 5, text: "Get comfortable. Don't look at the camera."),
+                        GuideStep(start: 5, end: 35, text: "Have the moment. Keep it real and keep moving gently."),
+                        GuideStep(start: 35, end: 40, text: "Hold still in the last moment.")
+                    ])
+            }
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .wide, fps: 60, stabilisation: .off,
-                autoStop: 30, countdown: 10,
-                before: "Tripod, with the view behind you. It films at 60 fps so the moment can be slowed down a little. "
-                    + "For a mountain that looms bigger, set up further back and use the zoom lens. "
-                    + "Ideas: lie back in the flowers, a kiss in front of the view, a slow spin, walking hand in hand.",
+                autoStop: 35, countdown: 10,
+                before: "Tripod, with the view behind you. Enjoy the place itself: touch the water, lie back in the grass, "
+                    + "take in the view, explore. For a mountain that looms bigger, set up further back and use the zoom lens.",
                 steps: [
                     GuideStep(start: 0, end: 5, text: "Get comfortable. Don't look at the camera."),
-                    GuideStep(start: 5, end: 25, text: "Have the moment. Keep it real and keep moving gently."),
-                    GuideStep(start: 25, end: 30, text: "Hold still in the last moment.")
+                    GuideStep(start: 5, end: 30, text: "Enjoy the place. Keep it real and keep moving gently."),
+                    GuideStep(start: 30, end: 35, text: "Hold still in the last moment.")
                 ])
 
         case .follow:
@@ -740,26 +841,100 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 ])
 
         case .detail:
-            return ShotPlan(
-                shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 30, stabilisation: .cinematic,
-                autoStop: 6,
-                before: "Get close to something small: moss, water, rock, a sign, your hands. Tap it to focus first.",
-                steps: [
-                    GuideStep(start: 0, end: 1, text: "Hold steady."),
-                    GuideStep(start: 1, end: 5, text: "Hold, or slide very slowly."),
-                    GuideStep(start: 5, end: 6, text: "Done.")
-                ])
+            switch roleID {
+            case "object":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 6,
+                    before: "Something that tells the story: a sign, a map, a ticket, your gear, a cup. Tap it to focus first.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Hold steady."),
+                        GuideStep(start: 1, end: 5, text: "Hold, or slide very slowly."),
+                        GuideStep(start: 5, end: 6, text: "Done.")
+                    ])
+            case "hands":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 10,
+                    before: "Your hand touching something: rock, water, a rail, a leaf. Film with your other hand, close in.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Frame the spot, with your hand just out of shot."),
+                        GuideStep(start: 2, end: 8, text: "Reach in and touch it slowly."),
+                        GuideStep(start: 8, end: 10, text: "Hold.")
+                    ])
+            case "foreground":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 8,
+                    before: "Get close to something sharp in front, like flowers, a fence or leaves, with the view soft behind it. "
+                        + "Tap the close thing to focus.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Hold steady."),
+                        GuideStep(start: 1, end: 7, text: "Hold, or slide slowly past it."),
+                        GuideStep(start: 7, end: 8, text: "Done.")
+                    ])
+            case "only-here":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 8,
+                    before: "A small detail you'd only find here: a carving, a local sign, a special plant. Tap it to focus first.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Hold steady."),
+                        GuideStep(start: 1, end: 7, text: "Hold, or slide very slowly."),
+                        GuideStep(start: 7, end: 8, text: "Done.")
+                    ])
+            case "nature":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 8,
+                    before: "Swap-in for a detail this place doesn't have: a leaf, a flower, drops of water, an insect. Get close "
+                        + "and tap it to focus.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Hold steady."),
+                        GuideStep(start: 1, end: 7, text: "Hold still. Let it move if it's alive."),
+                        GuideStep(start: 7, end: 8, text: "Done.")
+                    ])
+            default:
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .cinematic,
+                    autoStop: 8,
+                    before: "Get close to a surface: rock, bark, sand, ice or the water. Tap it to focus first.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Hold steady."),
+                        GuideStep(start: 1, end: 7, text: "Hold, or slide very slowly across it."),
+                        GuideStep(start: 7, end: 8, text: "Done.")
+                    ])
+            }
 
         case .pov:
+            if roleID == "through" {
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .strongest,
+                    autoStop: 20,
+                    before: "Moving through the place: the forest, the market, along the water. Chest height, and look "
+                        + "around as you go.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Start moving slowly."),
+                        GuideStep(start: 2, end: 17, text: "Walk smoothly and look around: up, to the side, at what's there."),
+                        GuideStep(start: 17, end: 20, text: "Ease to a stop.")
+                    ])
+            }
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
                 lens: .wide, fps: 60, stabilisation: .strongest,
                 autoStop: 15,
-                before: "Phone at chest height, pointing where you're going, with your feet, hands or the track ahead in frame.",
+                before: "Heading towards something: the track ahead, the path to the view. Phone at chest height, pointing "
+                    + "where you're going, with your feet, hands or the track in frame.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Start moving slowly."),
-                    GuideStep(start: 2, end: 12, text: "Walk smoothly: feet, hands, the track ahead."),
+                    GuideStep(start: 2, end: 12, text: "Walk smoothly towards it: feet, hands, the track ahead."),
                     GuideStep(start: 12, end: 15, text: "Ease to a stop.")
                 ])
 
@@ -794,12 +969,12 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
                 lens: .wide, fps: 30, stabilisation: .cinematic,
-                autoStop: 20,
+                autoStop: 30,
                 before: "Point at the sound: water, wind in the trees, birds.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Point at the sound and hold."),
-                    GuideStep(start: 2, end: 18, text: "Stay silent. Keep still."),
-                    GuideStep(start: 18, end: 20, text: "Hold.")
+                    GuideStep(start: 2, end: 28, text: "Stay silent. Keep still."),
+                    GuideStep(start: 28, end: 30, text: "Hold.")
                 ])
 
         case .slomo:
@@ -897,16 +1072,91 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 variantName: variantName)
 
         case .bRoll:
-            return ShotPlan(
-                shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 60, stabilisation: .cinematic,
-                autoStop: 5,
-                before: "Anything that shows the place: a sign, people, traffic, flags in the wind, the car park, your boots. "
-                    + "Keep the subject in the middle. It stops by itself, so grab a few in a row.",
-                steps: [
-                    GuideStep(start: 0, end: 1, text: "Frame it with the subject in the middle."),
-                    GuideStep(start: 1, end: 5, text: "Hold still, or drift very slowly. Let things move in the frame.")
-                ])
+            switch roleID {
+            case "people":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .cinematic,
+                    autoStop: 10,
+                    before: "Someone doing something: walkers, a guide, a market stall, people at the lookout. Small or from behind "
+                        + "is fine.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Frame it and hold."),
+                        GuideStep(start: 1, end: 10, text: "Hold still and let them move through.")
+                    ])
+            case "movement":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .cinematic,
+                    autoStop: 10,
+                    before: "Something moving through the frame: traffic, flags, waves, birds, a train. Hold still and let it move.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Frame it and hold."),
+                        GuideStep(start: 1, end: 10, text: "Hold still. Let it move through the frame.")
+                    ])
+            case "local":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .cinematic,
+                    autoStop: 8,
+                    before: "What makes this place this place: a sign with its name, a landmark, buildings, local things.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Frame it with the subject in the middle."),
+                        GuideStep(start: 1, end: 8, text: "Hold still, or drift very slowly.")
+                    ])
+            case "lens-angle":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .tele, fps: 60, stabilisation: .cinematic,
+                    autoStop: 10,
+                    before: "A contrasting look: the 5x on something far away, or go very low, very high or film through something.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Frame it and hold."),
+                        GuideStep(start: 1, end: 10, text: "Hold very still. Long lenses show every shake.")
+                    ])
+            case "transition":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .cinematic,
+                    autoStop: 6,
+                    before: "A shot that moves the edit on: walk past something close to the lens, a door opening, a slow pan away, "
+                        + "a car passing close.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Get ready."),
+                        GuideStep(start: 1, end: 6, text: "Let something pass close to the lens, or pan away.")
+                    ])
+            case "nature":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .cinematic,
+                    autoStop: 10,
+                    before: "Swap-in for a role this place doesn't have: plants, animals or water, something alive in the scene.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Frame it and hold."),
+                        GuideStep(start: 1, end: 10, text: "Hold still, or drift very slowly.")
+                    ])
+            case "into-light":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .cinematic,
+                    autoStop: 8,
+                    before: "Swap-in for a role this place doesn't have: face the sun for flare, glowing edges or silhouettes. Keep "
+                        + "the sun just behind something.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Frame it and hold."),
+                        GuideStep(start: 1, end: 8, text: "Hold still, or drift slowly past the sun.")
+                    ])
+            default:
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 60, stabilisation: .cinematic,
+                    autoStop: 12,
+                    before: "Light, weather and mood: mist, clouds, sun through the trees, rain on water. Hold still and let it be.",
+                    steps: [
+                        GuideStep(start: 0, end: 1, text: "Frame it and hold."),
+                        GuideStep(start: 1, end: 12, text: "Hold still. Let the light and weather do the work.")
+                    ])
+            }
 
         case .stay:
             return ShotPlan(

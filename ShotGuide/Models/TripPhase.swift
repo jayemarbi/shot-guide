@@ -6,8 +6,10 @@ struct ShotSlot: Identifiable, Hashable {
     /// For WHIP: 0 is the Out half (ends a place), 1 the In half (starts one). For HOME: Before and After.
     /// nil is the whole shot.
     let half: Int?
+    /// The creative role to open the camera on, when one was tapped. nil lets the camera pick the next one needed.
+    var role: String? = nil
 
-    var id: String { shot.rawValue + (half.map { "-\($0)" } ?? "") }
+    var id: String { shot.rawValue + (half.map { "-\($0)" } ?? "") + (role.map { "." + $0 } ?? "") }
 
     var variantName: String? {
         guard let half, shot.variants.indices.contains(half) else { return nil }
@@ -26,6 +28,14 @@ struct ShotSlot: Identifiable, Hashable {
 
     func counts(for type: TripType) -> Bool {
         type.counts(shot)
+    }
+
+    func tier(for type: TripType) -> ShotTier {
+        type.tier(for: shot)
+    }
+
+    func lightDayTarget(for type: TripType) -> Int {
+        half == nil ? type.lightDayTarget(for: shot) : 0
     }
 
     func summary(for type: TripType) -> String {
@@ -93,7 +103,8 @@ enum TripPhase: String, CaseIterable, Identifiable {
         case .leaving:
             return "As you go. WHIP · OUT ends this place in an edit, and VOICEOVER is best somewhere quiet, like the car. "
                 + "STAY is for when you first walk into where you're sleeping, and HOME · AFTER for once you're home. "
-                + "Shots marked extra are for when the day allows, so they don't count towards the total."
+                + "Shots marked full day count towards a full day. Extras are there whenever they're worth it, and never "
+                + "add to what a day needs."
         }
     }
 

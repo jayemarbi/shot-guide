@@ -1,9 +1,9 @@
 import Foundation
 
-/// Changes to one shot for a type of trip: more or fewer takes, whether it counts, and what to film.
+/// Changes to one shot for a type of trip: more or fewer takes, how much it matters, and what to film.
 struct ShotTuning {
     var target: Int? = nil
-    var counts: Bool? = nil
+    var tier: ShotTier? = nil
     var summary: String? = nil
 }
 
@@ -63,8 +63,19 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         tuning(for: shot)?.target ?? shot.targetTakes
     }
 
+    /// Core (everyday), full day or extra, for this type of trip.
+    func tier(for shot: ShotType) -> ShotTier {
+        tuning(for: shot)?.tier ?? shot.tier
+    }
+
+    /// Whether the shot counts towards a day at all (core or full day).
     func counts(_ shot: ShotType) -> Bool {
-        tuning(for: shot)?.counts ?? shot.countsTowardTotal
+        tier(for: shot) != .extra
+    }
+
+    /// The takes a light day asks for: a little of each core shot.
+    func lightDayTarget(for shot: ShotType) -> Int {
+        tier(for: shot) == .core ? min(shot.lightDayTakes, target(for: shot)) : 0
     }
 
     func summary(for shot: ShotType) -> String {
@@ -88,7 +99,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    // A first draft from general know-how. The reel breakdowns will sharpen these.
+    // A first draft from general know-how. The reel breakdowns will sharpen these. Since 1.19 a target is the
+    // number of creative roles a shot needs (see Coverage.swift): falls have five kinds of DETAIL to fill.
 
     private static let mountainTuning: [ShotType: ShotTuning] = [
         .onTheWay: ShotTuning(summary: "The drive in and the trailhead"),
@@ -106,8 +118,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .onTheWay: ShotTuning(summary: "The drive up: winding roads, rainforest out the window"),
         .pov: ShotTuning(summary: "The track in: ferns, roots, the first sound of water"),
         .reveal: ShotTuning(summary: "The falls opening up through the trees"),
-        .ambient: ShotTuning(target: 2, summary: "20 seconds of the falls, nothing else"),
-        .detail: ShotTuning(target: 4, summary: "Moss, ferns, drops on leaves"),
+        .ambient: ShotTuning(target: 2, summary: "30 seconds of the falls, nothing else"),
+        .detail: ShotTuning(target: 5, summary: "Moss, ferns, drops on leaves"),
         .wide: ShotTuning(summary: "The whole falls, top to pool"),
         .slomo: ShotTuning(target: 3, summary: "Water hitting the pool, at 120 fps"),
         .tele: ShotTuning(summary: "You, small, at the foot of the falls"),
@@ -119,7 +131,7 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .onTheWay: ShotTuning(summary: "The coast road and the first glimpse of water"),
         .pov: ShotTuning(summary: "Walking down onto the sand"),
         .reveal: ShotTuning(summary: "The beach opening up below you"),
-        .ambient: ShotTuning(summary: "20 seconds of waves"),
+        .ambient: ShotTuning(summary: "30 seconds of waves"),
         .detail: ShotTuning(summary: "Sand, shells, rock pools, water on rocks"),
         .wide: ShotTuning(summary: "The whole bay and the coastline"),
         .slomo: ShotTuning(target: 2, summary: "Waves breaking, a splash, a run into the water"),
@@ -132,11 +144,12 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
     private static let cityTuning: [ShotType: ShotTuning] = [
         .onTheWay: ShotTuning(summary: "Trains, trams and the drive in"),
         .pov: ShotTuning(summary: "Walking the streets at eye level"),
-        .follow: ShotTuning(counts: true, summary: "Led by the hand through the crowd"),
+        .follow: ShotTuning(target: 1, tier: .fullDay, summary: "Led by the hand through the crowd"),
         .reveal: ShotTuning(summary: "Round a corner onto the skyline"),
-        .ambient: ShotTuning(summary: "20 seconds of street sound"),
+        .ambient: ShotTuning(summary: "30 seconds of street sound"),
         .detail: ShotTuning(summary: "Signs, coffee, neon, textures"),
-        .food: ShotTuning(target: 3, counts: true, summary: "Street food and cafes, close and slow"),
+        .food: ShotTuning(target: 2, tier: .core, summary: "Street food and cafes, close and slow"),
+        .bRoll: ShotTuning(summary: "Streets, people, traffic, signs and lights"),
         .wide: ShotTuning(summary: "The skyline or the street, and its scale"),
         .slomo: ShotTuning(summary: "A crowd crossing, pigeons, a splash"),
         .tele: ShotTuning(summary: "You, small, under the towers"),
@@ -144,7 +157,7 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
     ]
 
     private static let roadTuning: [ShotType: ShotTuning] = [
-        .onTheWay: ShotTuning(target: 4, counts: true, summary: "The road ahead, out the window and at each stop"),
+        .onTheWay: ShotTuning(target: 4, tier: .core, summary: "The road ahead, out the window and at each stop"),
         .pov: ShotTuning(summary: "Walking from the car at each stop"),
         .detail: ShotTuning(summary: "Road signs, the dash, maps, details at each stop"),
         .wide: ShotTuning(summary: "Each stop and its scale"),

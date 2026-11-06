@@ -254,6 +254,8 @@ final class TripStore: ObservableObject {
         let others = trip.clips.filter { $0.shot == shotName && $0.dayNumber == day && $0.id != clipID }
         trip.clips[index].shot = shotName
         trip.clips[index].take = (others.map { $0.take }.max() ?? 0) + 1
+        // A role belongs to the shot it was filmed for.
+        trip.clips[index].role = nil
         replace(trip)
         applyFileName(clipID: clipID, tripID: tripID)
     }
@@ -288,6 +290,51 @@ final class TripStore: ObservableObject {
             return "About \(minutes / 60) hours of 4K space left"
         }
         return "About \(minutes) min of 4K space left"
+    }
+
+    // MARK: Scenes
+
+    /// The scene for a clip being saved now, using (then clearing) your choice for the next clip if you made one.
+    func sceneForNewClip(tripID: UUID, day: Int, latitude: Double?, longitude: Double?, at date: Date) -> (scene: Int, confirmed: Bool) {
+        guard var trip = self.trip(id: tripID) else { return (1, false) }
+        let result = trip.sceneForNewClip(day: day, latitude: latitude, longitude: longitude, at: date)
+        if trip.nextScene?.day == day {
+            trip.nextScene = nil
+            replace(trip)
+        }
+        return result
+    }
+
+    /// Your choice for the next clip on a day: true starts a new scene, false keeps it in the last one, nil leaves
+    /// it to the app's suggestion.
+    func setNextScene(_ startsNew: Bool?, day: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        trip.nextScene = startsNew.map { SceneChoice(day: day, startsNew: $0) }
+        replace(trip)
+    }
+
+    func mergeScene(_ scene: Int, day: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        trip.mergeScene(scene, onDay: day)
+        replace(trip)
+    }
+
+    func splitScene(at clipID: UUID, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        trip.splitScene(at: clipID)
+        replace(trip)
+    }
+
+    func moveClip(_ clipID: UUID, toScene scene: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        trip.moveClip(clipID, toScene: scene)
+        replace(trip)
+    }
+
+    func confirmScene(_ scene: Int, day: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        trip.confirmScene(scene, onDay: day)
+        replace(trip)
     }
 
     func addClip(_ clip: Clip, to tripID: UUID) {
@@ -618,19 +665,23 @@ final class TripStore: ObservableObject {
         "name", "trip", "day", "trip_type", "shake_dps", "tilt_deg", "take_check", "zoom", "on_phone",
         "song", "song_file", "song_start_s",
         "profile", "white_balance_k", "tint", "iso", "shutter",
-        "orientation"
+        "orientation",
+        // Creative coverage (1.19), added at the end so the columns before keep their places.
+        "role", "role_name", "purpose", "scene", "scene_name", "scene_status", "planned_s", "usable", "coverage"
     ]
 
     static func catalogCSV(for trip: Trip) -> String {
         var lines = [catalogColumns.joined(separator: ",")]
+        let coverage = trip.coverageByClip()
         for clip in trip.clips.sorted(by: { $0.recordedAt < $1.recordedAt }) {
-            lines.append(catalogRow(clip, trip: trip).map { csvField($0) }.joined(separator: ","))
+            lines.append(catalogRow(clip, trip: trip, coverage: coverage[clip.id] ?? ClipCoverageInfo())
+                .map { csvField($0) }.joined(separator: ","))
         }
         // The byte-order mark makes Excel on Windows read accents correctly.
         return "\u{FEFF}" + lines.joined(separator: "\r\n") + "\r\n"
     }
 
-    private static func catalogRow(_ clip: Clip, trip: Trip) -> [String] {
+    private static func catalogRow(_ clip: Clip, trip: Trip, coverage: ClipCoverageInfo) -> [String] {
         let zone = TimeZone(identifier: clip.timeZoneID) ?? .current
         let day = trip.day(clip.dayNumber)
         let first: [String] = [
@@ -682,7 +733,20 @@ final class TripStore: ObservableObject {
             clip.shutterText ?? "",
             clip.orientationLabel ?? ""
         ]
-        return first + added + colour
+        // The role is a stable id; its title and purpose are the wording of the version that wrote the file.
+        let role = clip.roleID.flatMap { id in clip.shotType?.role(withID: id) }
+        let creative: [String] = [
+            role?.id ?? "",
+            role?.title ?? "",
+            role?.purpose ?? "",
+            coverage.scene.map { String($0) } ?? "",
+            coverage.sceneName ?? "",
+            coverage.scene == nil ? "" : (clip.sceneConfirmed == true ? "confirmed" : "suggested"),
+            clip.plannedLength.map { String(format: "%.1f", $0) } ?? "",
+            clip.usable.map { $0 ? "yes" : "no" } ?? "",
+            coverage.status?.rawValue ?? ""
+        ]
+        return first + added + colour + creative
     }
 
     static func csvField(_ value: String) -> String {
