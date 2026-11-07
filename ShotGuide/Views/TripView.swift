@@ -328,9 +328,9 @@ struct TripView: View {
             } footer: {
                 Text("A scene is the clips from one place, so each can tell a short story. The app suggests them from "
                     + "distance and time. Tap New place when you get somewhere new, or name a place from its menu, and its "
-                    + "clips get the name in their files. On a day at more than one place, the role buttons show what "
-                    + "you've filmed at the one you're at. Merge, split or confirm scenes whenever you like: they never "
-                    + "change the day's counts.")
+                    + "clips get the name in their files. On a day at more than one place, the shots that make each place "
+                    + "its own, like REACTION, WIDE and TELE, show what you've filmed at the one you're at. Merge, split "
+                    + "or confirm scenes whenever you like: they never change the day's counts.")
             }
         }
     }
@@ -791,28 +791,55 @@ struct TripView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if !coverage.roles.isEmpty {
+            if !coverage.roles.isEmpty || shot.perPlace {
                 placeChips(slot, trip: trip, day: day, dayCoverage: coverage)
             }
         }
         .foregroundStyle(Color.primary)
     }
 
-    /// The role chips: for the whole day, or, once the day has been at more than one place, for the place you're at,
-    /// under its name. The count beside the shot stays the day's (1.21).
+    /// The chips under a shot. Once the day has been at more than one place, the shots tracked at each place show
+    /// what you've filmed at the one you're at, under its name: their roles, or one To film here / Filmed here chip.
+    /// Otherwise the role chips follow the whole day. The count beside the shot is always the day's (1.21, 1.22).
     @ViewBuilder
     private func placeChips(_ slot: ShotSlot, trip: Trip, day: Int, dayCoverage: SlotCoverage) -> some View {
-        if let place = placeNow(trip, day: day) {
+        if slot.shot.perPlace, slot.half == nil, let place = placeNow(trip, day: day) {
+            let here = trip.coverage(for: slot, day: day, at: place)
             VStack(alignment: .leading, spacing: 6) {
                 Text(place.caption)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .padding(.leading, 40)
-                roleChips(trip.coverage(for: slot, day: day, at: place), slot: slot)
+                if here.roles.isEmpty {
+                    hereChip(here, slot: slot)
+                } else {
+                    roleChips(here, slot: slot)
+                }
             }
-        } else {
+        } else if !dayCoverage.roles.isEmpty {
             roleChips(dayCoverage, slot: slot)
         }
+    }
+
+    /// One chip for a shot without roles at the place you're at: To film here, or Filmed here once a take there
+    /// counts. Tap it to film.
+    private func hereChip(_ here: SlotCoverage, slot: ShotSlot) -> some View {
+        let look: CoverageChip.Look
+        if here.done > 0 {
+            look = here.confirmedDone > 0 ? .confirmed : .covered
+        } else {
+            look = here.retakes > 0 ? .retake : .toFilm
+        }
+        return HStack {
+            Button {
+                activeSlot = slot
+            } label: {
+                CoverageChip(text: here.done > 0 ? "Filmed here" : "To film here", look: look)
+            }
+            .buttonStyle(.borderless)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 40)
     }
 
     /// "2/3", a tick once it's covered (filled once every take that counts is confirmed), and any extras or takes

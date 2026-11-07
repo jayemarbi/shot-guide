@@ -841,6 +841,20 @@ extension Trip {
 
 // MARK: The place you're at
 
+extension ShotType {
+    /// The shots that show what makes each place its own, tracked at each place on a day at more than one (1.22): a
+    /// second waterfall gets its own REACTION, REVEAL, WIDE, TELE, WALKAWAY, MOMENT, SLOMO, MATCH CUT and AMBIENT. The
+    /// rest, like B-ROLL, DETAIL and POV, are gathered for the day as a whole.
+    var perPlace: Bool {
+        switch self {
+        case .reaction, .reveal, .wide, .tele, .walkaway, .moment, .slomo, .matchCut, .ambient:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 /// Where your next clip goes on a day that's been at more than one place (1.21): one of the day's scenes, or a new
 /// place with no clips yet.
 struct PlaceNow: Equatable {

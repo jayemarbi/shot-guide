@@ -432,6 +432,17 @@ def name_place(clips, scene, day, name):
     return changed
 
 
+PER_PLACE = set(re.findall(r"\.(\w+)", COVERAGE_SRC.split("var perPlace: Bool {", 1)[1].split("return true", 1)[0]))
+
+
+def chips_coverage(clips, slot, day, place, trip_type="general"):
+    """What the chips under a shot show (TripView.placeChips): the place's, for shots tracked at each place on a day
+    at more than one place, otherwise the day's."""
+    if slot[0] in PER_PLACE and slot[1] is None and place is not None:
+        return coverage_at(clips, slot, day, place, trip_type)
+    return coverage(clips, slot, day, trip_type)
+
+
 def name_for_new_clip(clips, day, scene_number, chosen_name, prefill):
     """TripStore.sceneForNewClip + the camera: a new place's chosen name, else your last name here, else the place's."""
     existing = next((m for n, m in scenes(clips, day) if n == scene_number), None)
@@ -691,6 +702,28 @@ check("A clip 400 m down at the base of the falls takes the place's name",
       name_for_new_clip(clips, 1, scene, None, None) == "Twin Falls")
 check("…but your last clip's own name wins when you're still beside it",
       name_for_new_clip(clips, 1, scene, None, "The pool") == "The pool")
+
+# 13b. Which shots are tracked at each place (1.22)
+check("Tracked at each place: REACTION, REVEAL, WIDE, TELE, WALKAWAY, MOMENT, SLOMO, MATCH CUT and AMBIENT",
+      PER_PLACE == {"reaction", "reveal", "wide", "tele", "walkaway", "moment", "slomo", "matchCut", "ambient"},
+      sorted(PER_PLACE))
+REACTION = ("reaction", None)
+clips = [clip("REACTION", lat=falls1[0], lon=falls1[1], at=T0),
+         clip("BROLL", "atmosphere", lat=falls1[0], lon=falls1[1], at=T0 + timedelta(minutes=1)),
+         clip("BROLL", "people", lat=falls1[0], lon=falls1[1], at=T0 + timedelta(minutes=2))]
+place = place_now(clips, 1, next_starts(clips, 1, falls2[0], falls2[1], T0 + timedelta(hours=1)), "Twin Falls")
+check("At the second falls, REACTION is to film here, though the day already has one",
+      chips_coverage(clips, REACTION, 1, place)["done"] == 0 and coverage(clips, REACTION, 1, "general")["complete"])
+check("…while B-ROLL keeps counting for the whole day (2 of 6, Atmosphere and People done)",
+      chips_coverage(clips, BROLL, 1, place)["done"] == 2
+      and chips_coverage(clips, BROLL, 1, place)["lines"] == coverage(clips, BROLL, 1, "general")["lines"])
+check("DETAIL and POV are gathered for the whole day too", "detail" not in PER_PLACE and "pov" not in PER_PLACE)
+scene, _ = scene_for_new_clip(clips, 1, falls2[0], falls2[1], T0 + timedelta(hours=1), choice=True)
+clips.append(clip("REACTION", lat=falls2[0], lon=falls2[1], at=T0 + timedelta(hours=1), name="Twin Falls", scene=scene))
+place = place_now(clips, 1, next_starts(clips, 1, falls2[0], falls2[1], T0 + timedelta(hours=1, minutes=1)))
+check("After filming it there: REACTION is filmed here, and an extra for the day",
+      chips_coverage(clips, REACTION, 1, place)["done"] == 1
+      and coverage(clips, REACTION, 1, "general")["statuses"][clips[-1].id] == "extra")
 
 # 14. Naming a place afterwards (1.21)
 clips = [clip("WIDE", "establishing", lat=falls1[0], lon=falls1[1]),

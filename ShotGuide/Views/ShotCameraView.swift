@@ -163,11 +163,11 @@ struct ShotCameraView: View {
         return trip.placeNow(day: day, startsNew: startsNew)
     }
 
-    /// The roles covered at the place you're at, or today when the day has been at one place, so a second waterfall
-    /// gets its own set while the day's counts carry on.
+    /// The roles covered at the place you're at, for the shots tracked at each place, or today otherwise and when
+    /// the day has been at one place. A second waterfall gets its own set while the day's counts carry on.
     private func roleCoverage(in trip: Trip) -> SlotCoverage {
         let slot = ShotSlot(shot: shot, half: nil)
-        if let place = placeNow(in: trip) {
+        if shot.perPlace, let place = placeNow(in: trip) {
             return trip.coverage(for: slot, day: day, at: place)
         }
         return trip.coverage(for: slot, day: day)
@@ -1549,7 +1549,7 @@ struct ShotCameraView: View {
             }
             return
         }
-        let place = shot.roles.isEmpty ? nil : placeNow(in: trip)
+        let place = shot.perPlace ? placeNow(in: trip) : nil
         let coverage = shot.roles.isEmpty ? trip.coverage(for: ShotSlot(shot: shot, half: nil), day: day)
             : roleCoverage(in: trip)
         let filmed = filmedID.flatMap { id in trip.clips.first(where: { $0.id == id }) }
@@ -1561,7 +1561,10 @@ struct ShotCameraView: View {
             return
         }
         if shot.roles.isEmpty {
-            if coverage.complete {
+            if let place, filmed != nil {
+                // A shot tracked at each place, on a day at more than one: this place has its own now.
+                message = "\(shot.title) filmed at \(place.name ?? "this place"). Film another, or tap ✕ to pick the next shot."
+            } else if coverage.complete {
                 let noun = coverage.target == 1 ? "take" : "takes"
                 message = "All \(coverage.target) \(noun) done. Film an extra, or tap ✕ to pick the next shot."
             }
