@@ -24,6 +24,7 @@ struct TripView: View {
     @State private var selectedDay: Int? = nil
     @State private var showStartDay = false
     @State private var showTypePicker = false
+    @State private var showAllShots = false
     /// The last copy to a drive, so its clips can come off the phone.
     @State private var lastCopy: TripStore.CopySummary? = nil
 
@@ -187,6 +188,7 @@ struct TripView: View {
             }
             typeRow(day)
             lightRow(trip)
+            allShotsRow
             if trip.clips(onDay: number).isEmpty {
                 Label("Before your first shot, wipe your lens. A smudge softens every shot.", systemImage: "sparkles")
                     .font(.subheadline)
@@ -453,6 +455,31 @@ struct TripView: View {
         .foregroundStyle(Color.primary)
     }
 
+    /// Every shot in the order of the day, with what you'd see in it and how to film it (1.20).
+    private var allShotsRow: some View {
+        Button {
+            showAllShots = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "book.fill")
+                    .frame(width: 28)
+                    .foregroundStyle(Color.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("All shots")
+                        .font(.headline)
+                    Text("What each one captures, where to film it and how")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(Color.primary)
+    }
+
     /// The light right now, so you know when to save the shots worth taking your time over.
     private func lightRow(_ trip: Trip) -> some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -527,6 +554,9 @@ struct TripView: View {
             }
             .sheet(isPresented: $showTypePicker) {
                 TypePickerSheet(tripID: tripID, day: currentDay)
+            }
+            .sheet(isPresented: $showAllShots) {
+                AllShotsView(type: store.trip(id: tripID)?.day(currentDay).type ?? .general)
             }
             .sheet(item: $selectedClip) { clip in
                 ReviewView(tripID: tripID, clipID: clip.id, autoplay: false, preselectSuggestions: false, title: "Clip")
