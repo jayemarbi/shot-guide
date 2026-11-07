@@ -25,11 +25,16 @@ struct TripView: View {
     @State private var showStartDay = false
     @State private var showTypePicker = false
     @State private var showAllShots = false
+    /// New place: the name being typed for the place your next clip starts (1.21).
+    @State private var askingNewPlace = false
+    /// The scene being named, and the name being typed.
+    @State private var namingScene: Int? = nil
+    @State private var placeDraft = ""
     /// The last copy to a drive, so its clips can come off the phone.
     @State private var lastCopy: TripStore.CopySummary? = nil
 
     var body: some View {
-        alerts(sheets(page))
+        alerts(placeAlerts(sheets(page)))
     }
 
     // The page is built from small pieces so the compiler can type-check each one quickly.
@@ -296,11 +301,15 @@ struct TripView: View {
     /// Whether your next clip would start a new scene: your choice if you made one, otherwise the app's suggestion
     /// from where you are now and when you filmed last.
     private func nextClipStartsScene(_ trip: Trip, day number: Int) -> Bool {
-        if let choice = trip.nextScene, choice.day == number {
-            return choice.startsNew
-        }
         let coordinate = location.location?.coordinate
-        return trip.suggestsNewScene(day: number, latitude: coordinate?.latitude, longitude: coordinate?.longitude, at: Date())
+        return trip.nextClipStartsScene(day: number, latitude: coordinate?.latitude, longitude: coordinate?.longitude,
+                                        at: Date())
+    }
+
+    /// The place you're filming at, once the day has been at more than one: the role buttons show what's been filmed
+    /// there (1.21).
+    private func placeNow(_ trip: Trip, day number: Int) -> PlaceNow? {
+        trip.placeNow(day: number, startsNew: nextClipStartsScene(trip, day: number))
     }
 
     @ViewBuilder
@@ -318,7 +327,10 @@ struct TripView: View {
                 Text("Scene coverage")
             } footer: {
                 Text("A scene is the clips from one place, so each can tell a short story. The app suggests them from "
-                    + "distance and time. Merge, split or confirm them whenever you like: they never change the day's counts.")
+                    + "distance and time. Tap New place when you get somewhere new, or name a place from its menu, and its "
+                    + "clips get the name in their files. On a day at more than one place, the role buttons show what "
+                    + "you've filmed at the one you're at. Merge, split or confirm scenes whenever you like: they never "
+                    + "change the day's counts.")
             }
         }
     }
@@ -330,8 +342,7 @@ struct TripView: View {
         let startsNew = nextClipStartsScene(trip, day: number)
         VStack(alignment: .leading, spacing: 6) {
             if let choice {
-                Label(choice.startsNew ? "Your next clip starts a new scene." : "Your next clip stays in \(current.name).",
-                      systemImage: "hand.point.up.left.fill")
+                Label(choiceText(choice, current: current), systemImage: "hand.point.up.left.fill")
                     .font(.subheadline)
                 Button("Undo") {
                     store.setNextScene(nil, day: number, tripID: tripID)
@@ -341,21 +352,38 @@ struct TripView: View {
             } else if startsNew {
                 Label("Looks like a new place: your next clip will start a new scene.", systemImage: "location.fill")
                     .font(.subheadline)
-                Button("Keep it in \(current.name)") {
-                    store.setNextScene(false, day: number, tripID: tripID)
+                HStack(spacing: 20) {
+                    Button("Name it") {
+                        placeDraft = ""
+                        askingNewPlace = true
+                    }
+                    Button("Keep it in \(current.name)") {
+                        store.setNextScene(false, day: number, tripID: tripID)
+                    }
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.semibold))
             } else {
                 Label("Filming at \(current.name).", systemImage: "location.fill")
                     .font(.subheadline)
-                Button("Start a new scene with the next clip") {
-                    store.setNextScene(true, day: number, tripID: tripID)
+                Button("New place") {
+                    placeDraft = ""
+                    askingNewPlace = true
                 }
                 .buttonStyle(.borderless)
                 .font(.subheadline.weight(.semibold))
             }
         }
+    }
+
+    private func choiceText(_ choice: SceneChoice, current: ClipScene) -> String {
+        guard choice.startsNew else {
+            return "Your next clip stays in \(current.name)."
+        }
+        if let name = choice.name {
+            return "Your next clip starts a new place: \(name)."
+        }
+        return "Your next clip starts a new scene."
     }
 
     private func sceneCard(_ scene: ClipScene, trip: Trip, day number: Int, isCurrent: Bool, isFirst: Bool) -> some View {
@@ -372,24 +400,26 @@ struct TripView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if !scene.confirmed || !isFirst {
-                    Menu {
-                        if !scene.confirmed {
-                            Button("Looks right") {
-                                store.confirmScene(scene.number, day: number, tripID: tripID)
-                            }
-                        }
-                        if !isFirst {
-                            Button("Merge with the scene before") {
-                                store.mergeScene(scene.number, day: number, tripID: tripID)
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.title3)
+                Menu {
+                    Button(scene.placeName == nil ? "Name this place" : "Rename this place") {
+                        placeDraft = scene.placeName ?? ""
+                        namingScene = scene.number
                     }
-                    .buttonStyle(.borderless)
+                    if !scene.confirmed {
+                        Button("Looks right") {
+                            store.confirmScene(scene.number, day: number, tripID: tripID)
+                        }
+                    }
+                    if !isFirst {
+                        Button("Merge with the scene before") {
+                            store.mergeScene(scene.number, day: number, tripID: tripID)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
                 }
+                .buttonStyle(.borderless)
             }
             FlowLayout(spacing: 6) {
                 ForEach(SceneIngredient.allCases) { ingredient in
@@ -610,6 +640,34 @@ struct TripView: View {
             }
     }
 
+    /// New place, and naming a place afterwards: a name box each, and the name is optional (1.21).
+    private func placeAlerts<Page: View>(_ view: Page) -> some View {
+        view
+            .alert("New place", isPresented: $askingNewPlace) {
+                TextField("Name it, like Twin Falls", text: $placeDraft)
+                Button("Start") {
+                    store.setNextScene(true, day: currentDay, tripID: tripID, name: placeDraft)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your next clip starts a new place. Its clips get the name, so their files are easy to tell apart. "
+                    + "You can leave it blank.")
+            }
+            .alert(
+                "Name this place",
+                isPresented: Binding(get: { namingScene != nil }, set: { if !$0 { namingScene = nil } }),
+                presenting: namingScene
+            ) { scene in
+                TextField("Name it, like Twin Falls", text: $placeDraft)
+                Button("Save") {
+                    store.namePlace(scene, day: currentDay, name: placeDraft, tripID: tripID)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Its clips get the name, and their files too. Clips you've named yourself keep their own.")
+            }
+    }
+
     private static func exportedText(_ file: SharedFile) -> String {
         "\(file.url.lastPathComponent) is in the Shot Guide folder. Plug into your PC, open iTunes, click the phone button, "
             + "then File Sharing › Shot Guide, and save it. (In the Apple Devices app it's Files › Shot Guide.) "
@@ -734,10 +792,27 @@ struct TripView: View {
             }
             .buttonStyle(.plain)
             if !coverage.roles.isEmpty {
-                roleChips(coverage, slot: slot)
+                placeChips(slot, trip: trip, day: day, dayCoverage: coverage)
             }
         }
         .foregroundStyle(Color.primary)
+    }
+
+    /// The role chips: for the whole day, or, once the day has been at more than one place, for the place you're at,
+    /// under its name. The count beside the shot stays the day's (1.21).
+    @ViewBuilder
+    private func placeChips(_ slot: ShotSlot, trip: Trip, day: Int, dayCoverage: SlotCoverage) -> some View {
+        if let place = placeNow(trip, day: day) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(place.caption)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
+                roleChips(trip.coverage(for: slot, day: day, at: place), slot: slot)
+            }
+        } else {
+            roleChips(dayCoverage, slot: slot)
+        }
     }
 
     /// "2/3", a tick once it's covered (filled once every take that counts is confirmed), and any extras or takes

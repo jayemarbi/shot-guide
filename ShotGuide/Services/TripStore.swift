@@ -295,22 +295,44 @@ final class TripStore: ObservableObject {
     // MARK: Scenes
 
     /// The scene for a clip being saved now, using (then clearing) your choice for the next clip if you made one.
-    func sceneForNewClip(tripID: UUID, day: Int, latitude: Double?, longitude: Double?, at date: Date) -> (scene: Int, confirmed: Bool) {
-        guard var trip = self.trip(id: tripID) else { return (1, false) }
+    /// Also whether it starts a new place, and the place's name: the one you gave New place, or the name of the
+    /// place it joins (1.21).
+    func sceneForNewClip(tripID: UUID, day: Int, latitude: Double?, longitude: Double?,
+                         at date: Date) -> (scene: Int, confirmed: Bool, isNew: Bool, placeName: String?) {
+        guard var trip = self.trip(id: tripID) else { return (1, false, true, nil) }
         let result = trip.sceneForNewClip(day: day, latitude: latitude, longitude: longitude, at: date)
+        let existing = trip.scenes(onDay: day).first { $0.number == result.scene }
+        let chosen = trip.nextScene?.day == day ? trip.nextScene?.name : nil
         if trip.nextScene?.day == day {
             trip.nextScene = nil
             replace(trip)
         }
-        return result
+        if let existing {
+            return (result.scene, result.confirmed, false, existing.placeName)
+        }
+        return (result.scene, result.confirmed, true, chosen)
     }
 
     /// Your choice for the next clip on a day: true starts a new scene, false keeps it in the last one, nil leaves
-    /// it to the app's suggestion.
-    func setNextScene(_ startsNew: Bool?, day: Int, tripID: UUID) {
+    /// it to the app's suggestion. A new place can have a name, which its clips get.
+    func setNextScene(_ startsNew: Bool?, day: Int, tripID: UUID, name: String? = nil) {
         guard var trip = self.trip(id: tripID) else { return }
-        trip.nextScene = startsNew.map { SceneChoice(day: day, startsNew: $0) }
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let placeName = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        trip.nextScene = startsNew.map { SceneChoice(day: day, startsNew: $0, name: $0 ? placeName : nil) }
         replace(trip)
+    }
+
+    /// Names or renames a place: its clips without a name, or with its old name, get this one, and their files are
+    /// renamed to match (on the SSD, the next time the trip is copied). Clips with names of their own keep them.
+    func namePlace(_ scene: Int, day: Int, name: String, tripID: UUID) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var trip = self.trip(id: tripID) else { return }
+        let named = trip.namePlace(scene, onDay: day, name: trimmed)
+        replace(trip)
+        for clipID in named {
+            applyFileName(clipID: clipID, tripID: tripID)
+        }
     }
 
     func mergeScene(_ scene: Int, day: Int, tripID: UUID) {

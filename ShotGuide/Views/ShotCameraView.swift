@@ -149,10 +149,28 @@ struct ShotCameraView: View {
         fixedVariant == nil ? plan.role : nil
     }
 
-    /// This shot's progress today, for shots with roles.
+    /// This shot's progress, for shots with roles: today's, or the place's once the day has been at more than one.
     private var shotCoverage: SlotCoverage? {
-        guard !shot.roles.isEmpty, fixedVariant == nil else { return nil }
-        return store.trip(id: tripID)?.coverage(for: ShotSlot(shot: shot, half: nil), day: day)
+        guard !shot.roles.isEmpty, fixedVariant == nil, let trip = store.trip(id: tripID) else { return nil }
+        return roleCoverage(in: trip)
+    }
+
+    /// The place you're filming at, on a day that's been at more than one (1.21). nil on a day at one place.
+    private func placeNow(in trip: Trip) -> PlaceNow? {
+        let coordinate = location.location?.coordinate
+        let startsNew = trip.nextClipStartsScene(day: day, latitude: coordinate?.latitude,
+                                                 longitude: coordinate?.longitude, at: Date())
+        return trip.placeNow(day: day, startsNew: startsNew)
+    }
+
+    /// The roles covered at the place you're at, or today when the day has been at one place, so a second waterfall
+    /// gets its own set while the day's counts carry on.
+    private func roleCoverage(in trip: Trip) -> SlotCoverage {
+        let slot = ShotSlot(shot: shot, half: nil)
+        if let place = placeNow(in: trip) {
+            return trip.coverage(for: slot, day: day, at: place)
+        }
+        return trip.coverage(for: slot, day: day)
     }
 
     /// How to hold the phone for this take: the shot's way, unless the role changes it (WIDE's vertical hero).
@@ -186,7 +204,8 @@ struct ShotCameraView: View {
         }
     }
 
-    /// The role buttons, with a tick on the ones today already has. Swap-ins come after the usual roles.
+    /// The role buttons, with a tick on the ones today (or this place, on a day at more than one) already has.
+    /// Swap-ins come after the usual roles.
     private var rolePicker: some View {
         let lines = shotCoverage?.roles ?? []
         let current = currentRole?.id
@@ -1385,6 +1404,8 @@ struct ShotCameraView: View {
             }
             // The scene: the app's suggestion from where and when, or your choice for this clip if you made one.
             let scene = store.sceneForNewClip(tripID: tripID, day: day, latitude: latitude, longitude: longitude, at: startedAt)
+            // Its name: a new place's is the one you gave it; otherwise your last clip's here, or the place's (1.21).
+            let placeName = scene.isNew ? scene.placeName : (prefill ?? scene.placeName)
             let clip = Clip(
                 fileName: result.url.lastPathComponent,
                 shot: shot.rawValue,
@@ -1404,7 +1425,7 @@ struct ShotCameraView: View {
                 favourite: false,
                 notes: "",
                 marks: takeMarks.isEmpty ? nil : takeMarks,
-                name: prefill,
+                name: placeName,
                 day: day,
                 shake: motion?.shake,
                 tilt: motion?.tilt,
@@ -1425,11 +1446,15 @@ struct ShotCameraView: View {
                 plannedLength: plannedLength)
             store.addClip(clip, to: tripID)
             lastClipID = clip.id
-            if prefill != nil {
+            if placeName != nil {
                 // Named after the spot you're still at, so the file gets the name straight away.
                 store.applyFileName(clipID: clip.id, tripID: tripID)
             }
-            reviewNote = prefill == nil ? nil : "Same as your last clip here"
+            if placeName == nil {
+                reviewNote = nil
+            } else {
+                reviewNote = !scene.isNew && prefill != nil ? "Same as your last clip here" : "Named after this place"
+            }
             if shot == .matchCut, let saved = store.trip(id: tripID)?.clips.first(where: { $0.id == clip.id }),
                let trip = store.trip(id: tripID) {
                 ghostZoom = zoomAtStart
@@ -1524,7 +1549,9 @@ struct ShotCameraView: View {
             }
             return
         }
-        let coverage = trip.coverage(for: ShotSlot(shot: shot, half: nil), day: day)
+        let place = shot.roles.isEmpty ? nil : placeNow(in: trip)
+        let coverage = shot.roles.isEmpty ? trip.coverage(for: ShotSlot(shot: shot, half: nil), day: day)
+            : roleCoverage(in: trip)
         let filmed = filmedID.flatMap { id in trip.clips.first(where: { $0.id == id }) }
         if let filmed, !filmed.countsAsCoverage {
             // Not counted: say why, and stay on the same role for another go.
@@ -1547,7 +1574,8 @@ struct ShotCameraView: View {
         } else if coverage.complete {
             let optional = coverage.openOptionalRoles.map { $0.title }
             let more = optional.isEmpty ? "More takes are welcome as extras" : "Optional: \(optional.joined(separator: ", "))"
-            message = "\(shot.title) is covered for today. \(more), or tap ✕ to pick the next shot."
+            let whereCovered = place.map { "at \($0.name ?? "this place")" } ?? "for today"
+            message = "\(shot.title) is covered \(whereCovered). \(more), or tap ✕ to pick the next shot."
         }
     }
 

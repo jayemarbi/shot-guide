@@ -641,9 +641,24 @@ struct ClipScene: Identifiable {
 
     var id: Int { number }
 
-    /// The first name you gave a clip there, like "Lower Falls", or "Scene 2".
+    /// The place's name, like "Twin Falls", or "Scene 2" before it has one.
     var name: String {
-        clips.compactMap { $0.displayName }.first ?? "Scene \(number)"
+        placeName ?? "Scene \(number)"
+    }
+
+    /// The name most of its clips share (the first one given, if it's a tie), set by naming the place or the clips
+    /// (1.21). nil until a clip there has a name.
+    var placeName: String? {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for name in clips.compactMap({ $0.displayName }) {
+            if counts[name] == nil {
+                order.append(name)
+            }
+            counts[name, default: 0] += 1
+        }
+        // max(by:) keeps the first of equal counts, so a tie goes to the name given first.
+        return order.max { (counts[$0] ?? 0) < (counts[$1] ?? 0) }
     }
 
     /// Every clip's place in the scene confirmed by you. Otherwise the grouping is the app's suggestion.
@@ -661,6 +676,8 @@ struct ClipScene: Identifiable {
 struct SceneChoice: Codable, Hashable {
     var day: Int
     var startsNew: Bool
+    /// The new place's name, when you named it with New place (1.21). Its clips get it.
+    var name: String? = nil
 }
 
 extension Trip {
@@ -804,6 +821,76 @@ extension Trip {
         for index in clips.indices where clips[index].dayNumber == number && clips[index].scene == scene {
             clips[index].sceneConfirmed = true
         }
+    }
+
+    /// Names (or renames) a place (1.21): its clips without a name, or with the place's old name, get this one. Clips
+    /// you gave a name of their own keep it. Returns the clips that changed, so their files can be renamed to match.
+    mutating func namePlace(_ scene: Int, onDay number: Int, name: String) -> [UUID] {
+        fixScenes(onDay: number)
+        let old = scenes(onDay: number).first { $0.number == scene }?.placeName
+        var named: [UUID] = []
+        for index in clips.indices where clips[index].dayNumber == number && clips[index].scene == scene {
+            let current = clips[index].displayName
+            guard current == nil || current == old, current != name else { continue }
+            clips[index].name = name
+            named.append(clips[index].id)
+        }
+        return named
+    }
+}
+
+// MARK: The place you're at
+
+/// Where your next clip goes on a day that's been at more than one place (1.21): one of the day's scenes, or a new
+/// place with no clips yet.
+struct PlaceNow: Equatable {
+    /// The scene, or nil for a new place your next clip starts.
+    let scene: Int?
+    /// Its name, if it has one.
+    let name: String?
+
+    /// "At Twin Falls", "At Scene 2" or "At the new place", over the role buttons.
+    var caption: String {
+        if let name {
+            return "At \(name)"
+        }
+        return scene.map { "At Scene \($0)" } ?? "At the new place"
+    }
+}
+
+extension Trip {
+    /// Whether your next clip starts a new scene: your choice if you made one, otherwise the app's suggestion from
+    /// where you are and when you filmed last.
+    func nextClipStartsScene(day number: Int, latitude: Double?, longitude: Double?, at date: Date) -> Bool {
+        if let choice = nextScene, choice.day == number {
+            return choice.startsNew
+        }
+        return suggestsNewScene(day: number, latitude: latitude, longitude: longitude, at: date)
+    }
+
+    /// The place you're filming at, once a day has been at more than one, or is about to be. nil for a day at one
+    /// place, where the role buttons follow the whole day as before.
+    func placeNow(day number: Int, startsNew: Bool) -> PlaceNow? {
+        let dayScenes = scenes(onDay: number)
+        guard let last = dayScenes.last else { return nil }
+        if startsNew {
+            let chosen = nextScene?.day == number ? nextScene?.name : nil
+            return PlaceNow(scene: nil, name: chosen)
+        }
+        guard dayScenes.count > 1 else { return nil }
+        return PlaceNow(scene: last.number, name: last.placeName)
+    }
+
+    /// A row's roles at one place: only the takes filmed there count. The day's own counts are unchanged, so a role
+    /// filmed again at a second place is still an extra for the day.
+    func coverage(for slot: ShotSlot, day number: Int, at place: PlaceNow) -> SlotCoverage {
+        var here: Set<UUID> = []
+        if let scene = place.scene, let match = scenes(onDay: number).first(where: { $0.number == scene }) {
+            here = Set(match.clips.map { $0.id })
+        }
+        var atPlace = self
+        atPlace.clips = clips.filter { $0.dayNumber != number || here.contains($0.id) }
+        return atPlace.coverage(for: slot, day: number)
     }
 }
 

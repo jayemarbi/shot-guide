@@ -356,6 +356,89 @@ def split_scene(clips, clip_id):
         if c.day == clip.day and c.scene == current and c.at >= clip.at:
             c.scene, c.scene_confirmed = new, True
 
+
+# ---------------------------------------------------------------- places (1.21)
+
+
+def scenes(clips, day):
+    """Trip.scenes(onDay:): (number, clips) in the order they were filmed."""
+    numbers = scene_numbers(clips, day)
+    order, grouped = [], {}
+    for c in sorted((c for c in clips if c.day == day), key=lambda c: c.at):
+        n = numbers[c.id]
+        if n not in grouped:
+            order.append(n)
+            grouped[n] = []
+        grouped[n].append(c)
+    return [(n, grouped[n]) for n in order]
+
+
+def place_name(members):
+    """ClipScene.placeName: the name most clips share, the first given on a tie."""
+    counts, order = {}, []
+    for c in members:
+        if c.name:
+            if c.name not in counts:
+                order.append(c.name)
+            counts[c.name] = counts.get(c.name, 0) + 1
+    best = None
+    for n in order:
+        if best is None or counts[n] > counts[best]:
+            best = n
+    return best
+
+
+def next_starts(clips, day, lat, lon, at, choice=None):
+    """Trip.nextClipStartsScene: your choice, else the suggestion."""
+    if choice is not None:
+        return choice
+    day_clips = [c for c in clips if c.day == day]
+    if not day_clips:
+        return True
+    return is_new_scene(max(day_clips, key=lambda c: c.at), lat, lon, at)
+
+
+def place_now(clips, day, starts_new, chosen_name=None):
+    """Trip.placeNow: None for a day at one place, else (scene or None for a new place, name)."""
+    day_scenes = scenes(clips, day)
+    if not day_scenes:
+        return None
+    if starts_new:
+        return (None, chosen_name)
+    if len(day_scenes) < 2:
+        return None
+    number, members = day_scenes[-1]
+    return (number, place_name(members))
+
+
+def coverage_at(clips, slot, day, place, trip_type="general"):
+    """Trip.coverage(for:day:at:): only the place's takes count."""
+    here = set()
+    for n, members in scenes(clips, day):
+        if n == place[0]:
+            here = {c.id for c in members}
+    return coverage([c for c in clips if c.day != day or c.id in here], slot, day, trip_type)
+
+
+def name_place(clips, scene, day, name):
+    """Trip.namePlace: unnamed clips, and ones with the place's old name, get the new one."""
+    fix_scenes(clips, day)
+    old = next((place_name(m) for n, m in scenes(clips, day) if n == scene), None)
+    changed = []
+    for c in clips:
+        if c.day == day and c.scene == scene and (c.name is None or c.name == old) and c.name != name:
+            c.name = name
+            changed.append(c.id)
+    return changed
+
+
+def name_for_new_clip(clips, day, scene_number, chosen_name, prefill):
+    """TripStore.sceneForNewClip + the camera: a new place's chosen name, else your last name here, else the place's."""
+    existing = next((m for n, m in scenes(clips, day) if n == scene_number), None)
+    if existing is None:
+        return chosen_name
+    return prefill or place_name(existing)
+
 # ---------------------------------------------------------------- tests
 
 results = []
@@ -575,6 +658,59 @@ check("Split at a clip: it and later clips start a new scene",
 day_total_before = day_coverage(clips, 1, "general")
 merge_scene(clips, 2, 1)
 check("Scenes never change the day's counts", day_coverage(clips, 1, "general") == day_total_before)
+
+# 13. Two waterfalls on one hike (1.21)
+falls1 = (-28.19, 153.27)
+falls2 = (-28.20, 153.27)                                                              # ~1.1 km on
+clips = [clip("WIDE", r, lat=falls1[0], lon=falls1[1], at=T0 + timedelta(minutes=i))
+         for i, r in enumerate(("establishing", "human-scale", "alternative"))]
+check("One place so far: the role buttons follow the whole day",
+      place_now(clips, 1, next_starts(clips, 1, falls1[0], falls1[1], T0 + timedelta(minutes=10))) is None)
+arrive = T0 + timedelta(hours=1)
+starts = next_starts(clips, 1, falls2[0], falls2[1], arrive)
+place = place_now(clips, 1, starts)
+check("At the second falls: a new place, and its WIDE roles are all still to film there",
+      starts and place == (None, None) and coverage_at(clips, WIDE, 1, place)["done"] == 0
+      and len(coverage_at(clips, WIDE, 1, place)["open"]) == 3)
+check("…while the day's WIDE stays 3 of 3", coverage(clips, WIDE, 1, "general")["complete"])
+named = place_now(clips, 1, True, "Twin Falls")
+check("New place, named: the buttons say At Twin Falls", named == (None, "Twin Falls"))
+scene, _ = scene_for_new_clip(clips, 1, falls2[0], falls2[1], arrive, choice=True)
+check("Its first clip gets the name you gave it, not the last falls' name",
+      name_for_new_clip(clips, 1, scene, "Twin Falls", "Purling Brook Falls") == "Twin Falls")
+clips.append(clip("WIDE", "establishing", lat=falls2[0], lon=falls2[1], at=arrive, name="Twin Falls", scene=scene))
+place = place_now(clips, 1, next_starts(clips, 1, falls2[0], falls2[1], arrive + timedelta(minutes=2)))
+here = coverage_at(clips, WIDE, 1, place)
+check("Back on the trip page: At Twin Falls, Establishing done there, two roles to go",
+      place == (scene, "Twin Falls") and here["done"] == 1 and here["open"] == {"human-scale", "alternative"})
+check("…and next is Me in the view", next_role("wide", "establishing", here["open"]) == "human-scale")
+day_wide = coverage(clips, WIDE, 1, "general")
+check("The day's WIDE: still 3 of 3, the second falls' Establishing is an extra",
+      day_wide["done"] == 3 and day_wide["statuses"][clips[-1].id] == "extra")
+check("A clip 400 m down at the base of the falls takes the place's name",
+      name_for_new_clip(clips, 1, scene, None, None) == "Twin Falls")
+check("…but your last clip's own name wins when you're still beside it",
+      name_for_new_clip(clips, 1, scene, None, "The pool") == "The pool")
+
+# 14. Naming a place afterwards (1.21)
+clips = [clip("WIDE", "establishing", lat=falls1[0], lon=falls1[1]),
+         clip("BROLL", "atmosphere", lat=falls1[0], lon=falls1[1]),
+         clip("DETAIL", "texture", lat=falls1[0], lon=falls1[1])]
+changed = name_place(clips, 1, 1, "Purling Brook Falls")
+check("Naming a place names all its clips", {c.name for c in clips} == {"Purling Brook Falls"} and len(changed) == 3)
+clips.append(clip("DETAIL", "hands", lat=falls1[0], lon=falls1[1], name="Lookout"))
+clips.append(clip("BROLL", "people", lat=falls1[0], lon=falls1[1]))
+check("Its name is the one most clips share", place_name(clips) == "Purling Brook Falls")
+changed = name_place(clips, 1, 1, "Purling Brook")
+check("Renaming it changes the clips with its old name, and unnamed ones, and keeps one you named yourself",
+      [c.name for c in clips] == ["Purling Brook"] * 3 + ["Lookout", "Purling Brook"] and len(changed) == 4)
+only = [clip("WIDE", "establishing", lat=falls2[0], lon=falls2[1], name="Lookout"),
+        clip("BROLL", "atmosphere", lat=falls2[0], lon=falls2[1])]
+name_place(only, 1, 1, "Twin Falls")
+check("A place named after its only named clip: renaming the place renames that clip too",
+      [c.name for c in only] == ["Twin Falls", "Twin Falls"])
+check("Names never change the day's counts",
+      day_coverage(clips, 1, "general") == day_coverage([replace(c, name=None) for c in clips], 1, "general"))
 
 # 12. The order of the day and other features are unchanged
 check("The trip page order is the same as 1.18",
