@@ -1,0 +1,6 @@
+/Users/runner/work/shot-guide/shot-guide/ShotGuide/Services/GradedCopy.swift:104:19: warning: capture of 'videoIn' with non-Sendable type 'AVAssetWriterInput' in a '@Sendable' closure
+/Users/runner/work/shot-guide/shot-guide/ShotGuide/Services/GradedCopy.swift:105:36: warning: capture of 'videoOut' with non-Sendable type 'AVAssetReaderTrackOutput' in a '@Sendable' closure
+/Users/runner/work/shot-guide/shot-guide/ShotGuide/Services/GradedCopy.swift:110:84: warning: capture of 'adaptor' with non-Sendable type 'AVAssetWriterInputPixelBufferAdaptor' in a '@Sendable' closure
+/Users/runner/work/shot-guide/shot-guide/ShotGuide/Services/GradedCopy.swift:128:23: warning: capture of 'audioIn' with non-Sendable type 'AVAssetWriterInput' in a '@Sendable' closure
+/Users/runner/work/shot-guide/shot-guide/ShotGuide/Services/GradedCopy.swift:129:40: warning: capture of 'audioOut' with non-Sendable type 'AVAssetReaderTrackOutput' in a '@Sendable' closure
+2026-11-07 11:50:53.640 appintentsmetadataprocessor[4467:17119] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
