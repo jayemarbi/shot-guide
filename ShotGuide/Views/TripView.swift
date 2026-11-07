@@ -392,30 +392,21 @@ struct TripView: View {
             FlowLayout(spacing: 6) {
                 ForEach(SceneIngredient.allCases) { ingredient in
                     if have.contains(ingredient) {
-                        ingredientChip(ingredient.title, symbol: "checkmark.circle.fill", colour: .green)
+                        CoverageChip(text: ingredient.title, look: .done)
                     } else if isCurrent {
                         let suggestion = sceneSuggestion(ingredient, trip: trip, day: number)
                         Button {
                             activeSlot = suggestion.slot
                         } label: {
-                            ingredientChip("\(ingredient.title): \(suggestion.title)", symbol: "circle", colour: .orange)
+                            CoverageChip(text: "\(ingredient.title): \(suggestion.title)", look: .toFilm)
                         }
                         .buttonStyle(.borderless)
                     } else {
-                        ingredientChip(ingredient.title, symbol: "circle", colour: .secondary)
+                        CoverageChip(text: ingredient.title, look: .spare)
                     }
                 }
             }
         }
-    }
-
-    private func ingredientChip(_ text: String, symbol: String, colour: Color) -> some View {
-        Label(text, systemImage: symbol)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(colour.opacity(0.12), in: Capsule())
-            .foregroundStyle(colour)
     }
 
     /// The shot for a missing part of a scene's story: the first one the day still needs a role or take of, or
@@ -744,14 +735,14 @@ struct TripView: View {
         }
     }
 
-    /// One chip per creative role: tap to film that role.
+    /// One chip per creative role, named: tap one to film that role.
     private func roleChips(_ coverage: SlotCoverage, slot: ShotSlot) -> some View {
         FlowLayout(spacing: 6) {
             ForEach(coverage.roles) { line in
                 Button {
                     activeSlot = ShotSlot(shot: slot.shot, half: slot.half, role: line.role.id)
                 } label: {
-                    roleChip(line)
+                    CoverageChip(text: line.role.title, look: roleLook(line, shotCovered: coverage.complete))
                 }
                 .buttonStyle(.borderless)
             }
@@ -759,34 +750,25 @@ struct TripView: View {
         .padding(.leading, 40)
     }
 
-    private func roleChip(_ line: SlotCoverage.RoleLine) -> some View {
-        let symbol: String
-        let colour: Color
+    /// Green once a take counts for the role, a warning when its last take didn't, outlined for optional roles and
+    /// swap-ins, and for the usual roles left once the shot is covered.
+    private func roleLook(_ line: SlotCoverage.RoleLine, shotCovered: Bool) -> CoverageChip.Look {
         if line.confirmed > 0 {
-            symbol = "checkmark.circle.fill"
-            colour = .green
-        } else if line.covered {
-            symbol = "checkmark.circle"
-            colour = .green
-        } else if line.retakes > 0 {
-            symbol = "exclamationmark.triangle.fill"
-            colour = .orange
-        } else if line.role.isSubstitute {
-            symbol = "arrow.triangle.swap"
-            colour = .secondary
-        } else if line.role.isOptional {
-            symbol = "plus.circle"
-            colour = .secondary
-        } else {
-            symbol = "circle"
-            colour = .secondary
+            return .confirmed
         }
-        return Label(line.role.title, systemImage: symbol)
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(colour.opacity(0.12), in: Capsule())
-            .foregroundStyle(colour)
+        if line.covered {
+            return .covered
+        }
+        if line.retakes > 0 {
+            return .retake
+        }
+        if line.role.isOptional {
+            return .optional
+        }
+        if line.role.isSubstitute {
+            return .swapIn
+        }
+        return shotCovered ? .spare : .toFilm
     }
 
     /// Before a trip leaves the phone, make the cutouts and captions the editor needs. Clips already done are skipped.

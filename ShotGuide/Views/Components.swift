@@ -1,9 +1,19 @@
 import SwiftUI
 import UIKit
 
-/// Lays chips out in rows, wrapping to the next row when one fills up.
+/// Lays chips out in rows, wrapping to the next row when one fills up. A chip wider than a whole row gets a row of
+/// its own, at the row's width.
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
+
+    /// Each chip's natural size, or its size at the row's width when it wouldn't fit on a row at all.
+    private func sizes(of subviews: Subviews, maxWidth: CGFloat) -> [CGSize] {
+        subviews.map { subview in
+            let natural = subview.sizeThatFits(.unspecified)
+            guard natural.width > maxWidth else { return natural }
+            return subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+        }
+    }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let maxWidth = proposal.width ?? .infinity
@@ -11,8 +21,7 @@ struct FlowLayout: Layout {
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
         var widest: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+        for size in sizes(of: subviews, maxWidth: maxWidth) {
             if x > 0 && x + size.width > maxWidth {
                 x = 0
                 y += rowHeight + spacing
@@ -29,8 +38,7 @@ struct FlowLayout: Layout {
         var x = bounds.minX
         var y = bounds.minY
         var rowHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
+        for (subview, size) in zip(subviews, sizes(of: subviews, maxWidth: bounds.width)) {
             if x > bounds.minX && x + size.width > bounds.maxX {
                 x = bounds.minX
                 y += rowHeight + spacing
@@ -39,6 +47,108 @@ struct FlowLayout: Layout {
             subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+/// A small one-line chip for a creative role, or a part of a scene's story: green once it's covered, plain while
+/// it's still to film, outlined when it's optional, a swap-in or no longer needed, and with an orange warning when
+/// the last take for it didn't count.
+///
+/// Built from an image and a text rather than a `Label`: inside a list, a `Label` in a `FlowLayout` squeezed its
+/// words out and left tall empty pills (1.19).
+struct CoverageChip: View {
+    enum Look {
+        /// Covered by a take you've confirmed.
+        case confirmed
+        /// Covered by a take that counts for now.
+        case covered
+        /// A part of a scene's story that one of its clips already fills.
+        case done
+        /// Not covered yet: the last take for it didn't count.
+        case retake
+        /// Still to film.
+        case toFilm
+        /// Optional, like WIDE's vertical hero.
+        case optional
+        /// A swap-in for a usual role the place can't give.
+        case swapIn
+        /// Not needed any more: the shot is already covered, or the scene is behind you.
+        case spare
+    }
+
+    let text: String
+    let look: Look
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .foregroundStyle(look == .retake ? Color.orange : textColour)
+            }
+            Text(text)
+                .lineLimit(1)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(textColour)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(fill, in: Capsule())
+        .overlay {
+            if isOutlined {
+                Capsule()
+                    .strokeBorder(Color.secondary.opacity(0.5), lineWidth: 1)
+            }
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text + ", " + stateWords)
+    }
+
+    private var symbol: String? {
+        switch look {
+        case .confirmed: return "checkmark.circle.fill"
+        case .covered: return "checkmark.circle"
+        case .done: return "checkmark"
+        case .retake: return "exclamationmark.triangle.fill"
+        case .optional: return "plus"
+        case .swapIn: return "arrow.triangle.swap"
+        case .toFilm, .spare: return nil
+        }
+    }
+
+    private var isCovered: Bool {
+        look == .confirmed || look == .covered || look == .done
+    }
+
+    private var isOutlined: Bool {
+        look == .optional || look == .swapIn || look == .spare
+    }
+
+    private var textColour: Color {
+        if isCovered {
+            return .green
+        }
+        return isOutlined ? .secondary : Color.primary.opacity(0.85)
+    }
+
+    private var fill: Color {
+        if isCovered {
+            return Color.green.opacity(0.16)
+        }
+        return isOutlined ? .clear : Color.primary.opacity(0.1)
+    }
+
+    private var stateWords: String {
+        switch look {
+        case .confirmed: return "confirmed usable"
+        case .covered: return "counts for now"
+        case .done: return "covered"
+        case .retake: return "the last take didn't count"
+        case .toFilm: return "to film"
+        case .optional: return "optional"
+        case .swapIn: return "swap-in"
+        case .spare: return "not needed"
         }
     }
 }

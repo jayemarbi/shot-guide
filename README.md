@@ -12,6 +12,8 @@ An iPhone app for filming the jodyseescoolstuff shot list. Start a trip at a pla
 - WALKAWAY: Into the view, and New spot or action.
 - MOMENT: With the place, and Together.
 
+On the trip page each of these shots lists its roles as small named chips: green once a take counts (a filled tick once it's confirmed), plain while it's still to film, outlined for optional roles and swap-ins, and with an orange warning when the last take didn't count. Tap a chip to open the camera on that role, so you can film the roles in whatever order the places come.
+
 Each role has its own framing, camera settings, steps and length, and remembers your timing on its own. A role you never changed starts from what you'd set for the whole shot before roles. One take fills one role, so repeats are extras: welcome and catalogued, never an obligation.
 
 A take that passed its take check (or has none) and wasn't stopped short counts for now. It's confirmed once you mark it Usable on its review screen, or star a passing take as the best one. Use anyway counts a take despite its check, and Not usable stops one counting. None of this is required.
