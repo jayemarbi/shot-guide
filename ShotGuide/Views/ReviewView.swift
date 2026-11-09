@@ -147,7 +147,8 @@ struct ReviewView: View {
                 .frame(height: 90)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         } else if let player, clip?.isLog == true {
-            LogClipPlayer(player: player, orientation: logOrientation, lookName: looks.selected.name, wide: wide)
+            LogClipPlayer(player: player, orientation: logOrientation,
+                          lookName: looks.selected.isAsRecorded ? "as recorded" : looks.selected.name, wide: wide)
         } else if let player {
             VideoPlayer(player: player)
                 .aspectRatio(wide ? 16.0 / 9.0 : 9.0 / 16.0, contentMode: .fit)
@@ -178,7 +179,7 @@ struct ReviewView: View {
                         .font(.footnote)
                         .foregroundStyle(Color.red)
                 }
-                Text("A normal-looking copy with the \(looks.selected.name) look, for posting from your phone. The clip itself stays in Log for the edit.")
+                Text("A normal-looking copy with the \(looks.gradingLook.name) look, for posting from your phone. The clip itself stays in Log for the edit.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -199,7 +200,7 @@ struct ReviewView: View {
     }
 
     private func saveGradedCopy() {
-        guard let clip, let trip = store.trip(id: tripID), let cube = looks.currentCube else { return }
+        guard let clip, let trip = store.trip(id: tripID), let cube = looks.gradingCube else { return }
         let url = store.clipURL(clip, in: trip)
         player?.pause()
         copyState = .working(0)

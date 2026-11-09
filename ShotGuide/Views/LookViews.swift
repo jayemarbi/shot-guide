@@ -21,7 +21,11 @@ struct LookSheet: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(look.name)
-                                    if look.fileName == nil {
+                                    if look.isAsRecorded {
+                                        Text("The flat, grey picture as it's recorded, with the most left for grading")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else if look.fileName == nil {
                                         Text("Apple Log made to look like the normal camera")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -37,7 +41,7 @@ struct LookSheet: View {
                             .contentShape(Rectangle())
                         }
                         .foregroundStyle(Color.primary)
-                        .deleteDisabled(look.fileName == nil)
+                        .deleteDisabled(look.isBuiltIn)
                     }
                     .onDelete { offsets in
                         for index in offsets {
@@ -46,7 +50,8 @@ struct LookSheet: View {
                     }
                 } footer: {
                     Text("Clips are always recorded in Apple Log where the phone allows it, which keeps the most for grading. "
-                        + "The look only changes what you see while filming and reviewing, and the graded copies you save to Photos.")
+                        + "The look only changes what you see while filming and reviewing, and the graded copies you save to "
+                        + "Photos (Standard while you've picked no look).")
                 }
                 Section {
                     Button {

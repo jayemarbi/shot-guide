@@ -69,19 +69,34 @@ struct CubeLUT {
     }()
 }
 
-/// A look to view Apple Log clips through: the Standard one, or a .cube file you've added.
+/// A look to view Apple Log clips through: the Standard one, no look at all, or a .cube file you've added.
 struct Look: Identifiable, Hashable {
-    /// nil for the Standard look.
+    /// nil for the Standard look, `Look.asRecordedFile` for no look.
     let fileName: String?
 
+    /// The choice saved for no look: the picture as it's recorded, flat Apple Log (1.24.2). It isn't a file name (no
+    /// .cube on the end), so it can't clash with a look you add.
+    static let asRecordedFile = "apple-log"
+    static let standard = Look(fileName: nil)
+    static let asRecorded = Look(fileName: asRecordedFile)
+
+    var isAsRecorded: Bool { fileName == Look.asRecordedFile }
+    /// Standard and no look come with the app, so they can't be deleted.
+    var isBuiltIn: Bool { fileName == nil || isAsRecorded }
+
     var id: String { fileName ?? "standard" }
-    var name: String { fileName.map { ($0 as NSString).deletingPathExtension } ?? "Standard" }
+    var name: String {
+        if isAsRecorded {
+            return "Apple Log (no look)"
+        }
+        return fileName.map { ($0 as NSString).deletingPathExtension } ?? "Standard"
+    }
 }
 
 /// The looks you can see Apple Log footage through, kept in On My iPhone › Shot Guide › Looks. Clips are
 /// never changed by a look: it's what the camera and review screens show, and what graded copies use.
 final class LookLibrary: ObservableObject {
-    @Published private(set) var looks: [Look] = [Look(fileName: nil)]
+    @Published private(set) var looks: [Look] = [.standard, .asRecorded]
     @Published var selectedFile: String? {
         didSet {
             UserDefaults.standard.set(selectedFile, forKey: Self.selectedKey)
@@ -103,11 +118,14 @@ final class LookLibrary: ObservableObject {
     }
 
     var selected: Look {
-        looks.first { $0.fileName == selectedFile } ?? Look(fileName: nil)
+        looks.first { $0.fileName == selectedFile } ?? .standard
     }
 
-    /// The table for a look; the Standard one when a file can't be read.
+    /// The table for a look; the Standard one when a file can't be read. None for no look: the picture as recorded.
     func cube(for look: Look) -> CubeLUT? {
+        if look.isAsRecorded {
+            return nil
+        }
         guard let fileName = look.fileName else { return CubeLUT.standard }
         if let cached = cache[fileName] { return cached }
         let url = folder.appendingPathComponent(fileName)
@@ -120,14 +138,20 @@ final class LookLibrary: ObservableObject {
 
     var currentCube: CubeLUT? { cube(for: selected) }
 
+    /// The look graded copies use: the one you've picked, or Standard while you've picked no look, as a copy in flat
+    /// Log would look washed out for posting.
+    var gradingLook: Look { selected.isAsRecorded ? .standard : selected }
+
+    var gradingCube: CubeLUT? { cube(for: gradingLook) }
+
     func reload() {
         let files = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
         let custom = files
             .filter { ($0 as NSString).pathExtension.lowercased() == "cube" }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
             .map { Look(fileName: $0) }
-        looks = [Look(fileName: nil)] + custom
-        if let selectedFile, !custom.contains(where: { $0.fileName == selectedFile }) {
+        looks = [.standard, .asRecorded] + custom
+        if let selectedFile, selectedFile != Look.asRecordedFile, !custom.contains(where: { $0.fileName == selectedFile }) {
             self.selectedFile = nil
         }
     }
@@ -150,7 +174,7 @@ final class LookLibrary: ObservableObject {
     }
 
     func delete(_ look: Look) {
-        guard let fileName = look.fileName else { return }
+        guard !look.isBuiltIn, let fileName = look.fileName else { return }
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(fileName))
         cache[fileName] = nil
         reload()
