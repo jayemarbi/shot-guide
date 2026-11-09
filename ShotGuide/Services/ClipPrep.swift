@@ -10,14 +10,13 @@ enum ClipPrep {
         ShotType.voiceover.rawValue
     ]
 
-    /// The longest take that gets a cutout on the phone, in seconds.
-    static let longestMasked: Double = 120
+    /// Takes longer than this say so while their cutout's made, as it takes a few minutes.
+    static let longTake: Double = 120
 
+    /// Every shot you're in gets a cutout, long takes and DANCE included (1.24.1): text behind you, clones that
+    /// overlap, silhouettes and cutout effects all need one. TIMELAPSE is left out: you're not really in it.
     static func needsMask(_ clip: Clip) -> Bool {
-        // DANCE takes can run a whole song, and long takes like ONE TAKE and CLONE several minutes (1.24), which would
-        // take ages to cut out on the phone and heat it up, so they're skipped: the editor cuts you out of those.
-        clip.isOnPhone && clip.inShot && clip.shot != ShotType.timelapse.rawValue && clip.shot != ShotType.dance.rawValue
-            && clip.durationSeconds <= longestMasked && clip.maskFileName == nil
+        clip.isOnPhone && clip.inShot && clip.shot != ShotType.timelapse.rawValue && clip.maskFileName == nil
     }
 
     static func needsCaptions(_ clip: Clip) -> Bool {
@@ -37,7 +36,10 @@ enum ClipPrep {
 
         let maskClips = trip.clips.filter { needsMask($0) }
         for (index, clip) in maskClips.enumerated() {
-            status("Making cutouts of you: \(index + 1) of \(maskClips.count)…")
+            let long = clip.durationSeconds > longTake
+                ? " This one's \(clockString(clip.durationSeconds)) long, so it takes a few minutes."
+                : ""
+            status("Making cutouts of you: \(index + 1) of \(maskClips.count)…" + long)
             let maskName = baseName(clip.fileName) + "_mask.mov"
             do {
                 // Log clips are flat and grey; the person finder works better on them made to look normal.

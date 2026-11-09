@@ -91,7 +91,7 @@ Apps signed with a free Apple ID stop opening after 7 days. Install the same fil
 
 ## Getting footage off the phone
 
-Both ways first get the clips ready for editing, on the phone, once per clip: a cutout mask (`<clip>_mask.mov`, white where you are) for every shot you're in up to 2 minutes long (longer takes like ONE TAKE, CLONE and DANCE are left to the editor), and captions (`<clip>.srt`, plus the text in the catalogue) for TALK, REACTION, STAY and VOICEOVER. Keep the app open while that runs.
+Both ways first get the clips ready for editing, on the phone, once per clip: a cutout mask (`<clip>_mask.mov`, white where you are) for every shot you're in except TIMELAPSE, ONE TAKE, CLONE and DANCE included since 1.24.1 (a long take takes a few minutes, so do it on the charger), and captions (`<clip>.srt`, plus the text in the catalogue) for TALK, REACTION, STAY and VOICEOVER. Keep the app open while that runs.
 
 **With an SSD (the main way).** Plug the SSD into the iPhone. On a trip's page, tap **Export trip** › **Copy to SSD or folder**, and choose the SSD. The trip goes into `Shot Guide/<continent>/<country>/<state>/<date> <place>/` beside the trips already there, with its `catalog.csv` and `trip.json`. Clips already on the drive are skipped, so copying a trip again only adds new takes, and clips renamed since the last copy are renamed on the drive too. After a copy, **Free up space** takes the copied clips off the phone; the trip keeps its shot list, names and counts. The SSD needs to be formatted exFAT (or APFS) for the iPhone to write to it, and exFAT also works on Windows.
 
