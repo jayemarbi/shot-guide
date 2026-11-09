@@ -146,6 +146,20 @@ extension ShotType {
         }
     }
 
+    /// The roles on a day of a type: the same roles, with any optional one the type counts made a usual one, like
+    /// WIDE's vertical hero at waterfalls (1.26).
+    func roles(for type: TripType) -> [CoverageRole] {
+        let counted = type.countsOptionalRoles(of: self)
+        guard !counted.isEmpty else { return roles }
+        return roles.map { role in
+            var role = role
+            if counted.contains(role.id) {
+                role.isOptional = false
+            }
+            return role
+        }
+    }
+
     /// REVEAL's roles are its versions, picked with the same buttons.
     var rolesAreVariants: Bool { self == .reveal }
 
@@ -176,8 +190,9 @@ extension ShotType {
     }
 
     /// The roles to suggest next after `current`: the usual roles after it, then the ones before it, then swap-ins.
-    /// Only roles still `open` are suggested.
-    func nextRole(after current: String?, open: Set<String>) -> CoverageRole? {
+    /// Only roles still `open` are suggested. The day's type can make an optional role a usual one (1.26).
+    func nextRole(after current: String?, open: Set<String>, type: TripType) -> CoverageRole? {
+        let roles = self.roles(for: type)
         let usual = roles.filter { !$0.isOptional && !$0.isSubstitute }
         let start = current.flatMap { id in usual.firstIndex { $0.id == id } }.map { $0 + 1 } ?? 0
         let rotated = Array(usual[min(start, usual.count)...]) + Array(usual[..<min(start, usual.count)])
@@ -425,7 +440,7 @@ extension Trip {
             }
         }
         let usable = takes.filter { $0.countsAsCoverage }
-        let roles = slot.half == nil ? slot.shot.roles : []
+        let roles = slot.half == nil ? slot.shot.roles(for: type) : []
         var done = 0
         var confirmedDone = 0
         var lines: [SlotCoverage.RoleLine] = []
@@ -534,6 +549,7 @@ extension Trip {
             seen.insert(suggestion.skipKey)
             result.append(suggestion)
         }
+        let type = day(number).type
         for level in CoverageLevel.allCases {
             let rows = missing(level, day: number)
             let oneTakeRows = rows.filter { OneTakePart.canFill($0) }
@@ -542,7 +558,7 @@ extension Trip {
                     add(ShotSuggestion(shot: .oneTake))
                 }
                 let coverage = self.coverage(for: row.slot, day: number)
-                let role = row.slot.shot.nextRole(after: nil, open: coverage.openRoleIDs)
+                let role = row.slot.shot.nextRole(after: nil, open: coverage.openRoleIDs, type: type)
                 add(ShotSuggestion(shot: row.slot.shot, half: row.slot.half, role: role?.id))
             }
         }

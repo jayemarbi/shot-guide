@@ -18,7 +18,28 @@ Each role has its own framing, camera settings, steps and length, and remembers 
 
 A take that passed its take check (or has none) and wasn't stopped short counts for now. It's confirmed once you mark it Usable on its review screen, or star a passing take as the best one. Use anyway counts a take despite its check, and Not usable stops one counting. None of this is required.
 
-The trip page shows three levels built from the same takes: a light day (10 clips on a general day), everyday (22) and a full day (30, adding REACTION, TELE, TALK, SLOMO, MATCH CUT and SILHOUETTE). It also shows what each level still needs, role by role, and a Next button for the next useful role. Specialist shots stay extras, and trip types adjust the counts. Falls ask for 5 DETAIL and 2 AMBIENT, cities for 2 FOOD and a FOLLOW, and road trips for 4 ON THE WAY.
+The trip page shows three levels built from the same takes: a light day (10 clips on a general day), everyday (22) and a full day (30, adding REACTION, TELE, TALK, SLOMO, MATCH CUT and SILHOUETTE). It also shows what each level still needs, role by role, and a Next button for the next useful role. Specialist shots stay extras.
+
+**Each type of place (1.26).** Each kind of place makes a different kind of reel, so its list asks for the footage those reels need. Mountains make slow edits from a few huge shots with you small in them; falls and beaches run on moving water and slow motion; cities make fast edits from lots of short street shots; road trips run on the drive and the same move at every stop. General is the standard list.
+
+- Mountain and hiking: TELE counts every day and WILDLIFE (2) on full days; SLOMO is an extra.
+- Waterfalls and rainforest: SLOMO (2) counts every day, WIDE counts its vertical hero too (falls are tall: 4 roles), DETAIL asks for all 5, AMBIENT for 2 and WILDLIFE (1) for full days; one WALKAWAY, and SILHOUETTE is an extra.
+- Beach and coast: SLOMO (2) counts every day and REFLECTION on full days.
+- City: more of the small stuff (B-ROLL 7, the six kinds plus a swap-in; DETAIL 5; FOOD 2 every day; FOLLOW and HYPERLAPSE on full days) and less of the big views (one REVEAL, one WALKAWAY; SILHOUETTE is an extra).
+- Road trip: ON THE WAY (4) and MATCH CUT count every day and TIMELAPSE on full days; one REVEAL and one WALKAWAY, as there's less time at each stop; SLOMO is an extra.
+- Snow: SLOMO (2) and TELE count every day.
+
+A light day is always 10 clips, with the place's signature shot in it: TELE on a mountain, SLOMO at falls, beaches and snow, and ON THE WAY on a road trip, each in place of a B-ROLL, and FOOD in a city, in place of a WIDE. Every shot has a what-to-film tip for every type of place, General included, shown on the trip page, under Next and on the camera before the set-up.
+
+| Type | Light day | Everyday | Full day |
+|---|---|---|---|
+| General | 10 | 22 | 30 |
+| Mountain and hiking | 10 | 23 | 31 |
+| Waterfalls and rainforest | 10 | 26 | 33 |
+| Beach and coast | 10 | 24 | 32 |
+| City | 10 | 24 | 33 |
+| Road trip | 10 | 25 | 32 |
+| Snow | 10 | 25 | 31 |
 
 Scene coverage groups each day's clips into scenes, one per place, and shows what each scene's story still needs:
 

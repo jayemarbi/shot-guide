@@ -68,15 +68,24 @@ ROLES = read_roles()
 
 
 def read_tuning():
+    """Each type's ShotTuning table: target, tier, light day, optional roles that count, and the tip (1.26)."""
     tuning = {}
     for name, body in re.findall(r"static let (\w+)Tuning: \[ShotType: ShotTuning\] = \[(.*?)\n    \]", TYPE_SRC, re.S):
         entries = {}
-        for shot, args in re.findall(r"\.(\w+): ShotTuning\((.*?)\)(?:,|\n)", body):
+        for shot, args in re.findall(r'\.(\w+): ShotTuning\(((?:[^()"]|"[^"]*")*)\)', body):
             target = re.search(r"target: (\d+)", args)
             tier = re.search(r"tier: \.(\w+)", args)
-            entries[shot] = (int(target.group(1)) if target else None, tier.group(1) if tier else None)
+            light = re.search(r"lightDay: (\d+)", args)
+            also = re.search(r"alsoCounts: \[([^\]]*)\]", args)
+            summary = re.search(r'summary: "([^"]*)"', args)
+            if shot in entries:
+                raise SystemExit(f"{name}Tuning has {shot} twice")
+            entries[shot] = {"target": int(target.group(1)) if target else None,
+                             "tier": tier.group(1) if tier else None,
+                             "light": int(light.group(1)) if light else None,
+                             "also": re.findall(r'"([\w-]+)"', also.group(1)) if also else [],
+                             "summary": summary.group(1) if summary else None}
         tuning[name] = entries
-    tuning["general"] = {}
     return tuning
 
 
@@ -101,14 +110,26 @@ VARIANTS = {"reveal": ["Auto zoom", "Walk reveal", "Tilt up"], "whip": ["Out", "
             "talk": ["Tripod", "Walking"]}
 
 
+def tuned(shot, trip_type, key):
+    """One field of TripType.tuning(for:), or None where the type leaves it as the shot's own."""
+    entry = TUNING[trip_type].get(shot)
+    return entry[key] if entry else None
+
+
 def target(shot, trip_type):
-    tuned = TUNING[trip_type].get(shot)
-    return tuned[0] if tuned and tuned[0] is not None else TARGET[shot]
+    value = tuned(shot, trip_type, "target")
+    return value if value is not None else TARGET[shot]
 
 
 def tier(shot, trip_type):
-    tuned = TUNING[trip_type].get(shot)
-    return tuned[1] if tuned and tuned[1] is not None else TIER[shot]
+    value = tuned(shot, trip_type, "tier")
+    return value if value is not None else TIER[shot]
+
+
+def roles_for(shot, trip_type):
+    """ShotType.roles(for:): the type can count an optional role, like WIDE's vertical hero at falls (1.26)."""
+    counted = tuned(shot, trip_type, "also") or []
+    return [replace(r, optional=False) if r.id in counted else r for r in ROLES.get(shot, [])]
 
 
 def slot_target(slot, trip_type):
@@ -117,8 +138,12 @@ def slot_target(slot, trip_type):
 
 
 def light_target(slot, trip_type):
+    """TripType.lightDayTarget(for:): a little of each core shot, with the place's signature shot (1.26)."""
     shot, half = slot
-    return 0 if half is not None or tier(shot, trip_type) != "core" else min(LIGHT[shot], target(shot, trip_type))
+    if half is not None or tier(shot, trip_type) != "core":
+        return 0
+    light = tuned(shot, trip_type, "light")
+    return min(light if light is not None else LIGHT[shot], target(shot, trip_type))
 
 
 def goal(slot, level, trip_type):
@@ -211,7 +236,7 @@ def coverage(clips, slot, day, trip_type):
         if not c.counts:
             statuses[c.id] = "rejected" if c.usable is False else ("retake" if c.check_passed is False else "short")
     usable = [c for c in takes if c.counts]
-    roles = ROLES.get(shot, []) if half is None else []
+    roles = roles_for(shot, trip_type) if half is None else []
     done = 0
     lines = {}
 
@@ -247,14 +272,15 @@ def coverage(clips, slot, day, trip_type):
             "complete": done >= want}
 
 
-def next_role(shot, current, open_ids):
-    usual = [r for r in ROLES.get(shot, []) if not r.optional and not r.substitute]
+def next_role(shot, current, open_ids, trip_type="general"):
+    roles = roles_for(shot, trip_type)
+    usual = [r for r in roles if not r.optional and not r.substitute]
     ids = [r.id for r in usual]
     start = ids.index(current) + 1 if current in ids else 0
     for r in usual[start:] + usual[:start]:
         if r.id in open_ids:
             return r.id
-    return next((r.id for r in ROLES.get(shot, []) if r.substitute and r.id in open_ids), None)
+    return next((r.id for r in roles if r.substitute and r.id in open_ids), None)
 
 
 def day_coverage(clips, day, trip_type):
@@ -606,8 +632,8 @@ cov = coverage(old, BROLL, 1, "general")
 check("An older B-ROLL take still counts, as an unsorted take", cov["done"] == 1)
 
 # 9. Levels build on each other; totals per trip type
-expected_totals = {"general": (10, 22, 30), "mountain": (10, 22, 30), "falls": (10, 24, 34), "beach": (10, 22, 31),
-                   "city": (10, 24, 33), "road": (10, 26, 34), "snow": (10, 22, 31)}
+expected_totals = {"general": (10, 22, 30), "mountain": (10, 23, 31), "falls": (10, 26, 33), "beach": (10, 24, 32),
+                   "city": (10, 24, 33), "road": (10, 25, 32), "snow": (10, 25, 31)}             # 1.26
 for trip_type, want in expected_totals.items():
     totals = day_coverage([], 1, trip_type)
     got = tuple(totals[level][1] for level in ("light", "everyday", "full"))
@@ -880,7 +906,7 @@ def suggestions(clips, day, trip_type="general"):
             if len(one_rows) >= 2 and row is one_rows[0]:
                 add("oneTake", None, None)
             cov = coverage(takes, slot, day, trip_type)
-            add(slot[0], slot[1], next_role(slot[0], None, cov["open"]))
+            add(slot[0], slot[1], next_role(slot[0], None, cov["open"], trip_type))
     return out
 
 
@@ -1052,6 +1078,82 @@ clips.append(clip("WALKAWAY", "new-spot", existing=clips, in_shot=True))
 check("…but not once only WIDE · Another angle and MOMENT · Together are left: it could only fill one of them",
       "oneTake" not in [s[0] for s in suggestions(clips, 1)]
       and ("moment", None, "together", "MOMENT") in suggestions(clips, 1))
+
+# 14. Each type of place gets the shots its reels need (1.26)
+TYPES = ["general", "mountain", "falls", "beach", "city", "road", "snow"]
+missing_tips = [(t, shot) for t in TYPES for shot in RAW if not (tuned(shot, t, "summary") or "").strip()]
+check("Every type of place has a tip for every shot, General included: no missing tips",
+      set(TUNING) == set(TYPES) and missing_tips == [] and all(len(TUNING[t]) == len(RAW) for t in TYPES),
+      missing_tips[:6])
+tips = [(t, tuned(shot, t, "summary")) for t in TYPES for shot in RAW]
+check("Tips read as one line before the set-up: no full stop at the end, and none repeated within a type",
+      all(not tip.endswith(".") for _, tip in tips)
+      and all(len({tuned(shot, t, "summary") for shot in RAW}) == len(RAW) for t in TYPES),
+      [tip for _, tip in tips if tip.endswith(".")][:3])
+
+
+def light_day(trip_type):
+    return {slot[0]: light_target(slot, trip_type) for slot in SLOTS if light_target(slot, trip_type) > 0}
+
+
+check("General's light day is unchanged: WIDE 2, B-ROLL 3, DETAIL 2, POV, REVEAL and MOMENT 1",
+      light_day("general") == {"wide": 2, "bRoll": 3, "detail": 2, "pov": 1, "reveal": 1, "moment": 1},
+      light_day("general"))
+signature = {"mountain": ("tele", "bRoll"), "falls": ("slomo", "bRoll"), "beach": ("slomo", "bRoll"),
+             "city": ("food", "wide"), "road": ("onTheWay", "bRoll"), "snow": ("slomo", "bRoll")}
+for trip_type, (shot, makes_room) in signature.items():
+    days = light_day(trip_type)
+    base = light_day("general")
+    check(f"{trip_type}: a light day is 10 clips with its signature shot ({shot}) in place of a {makes_room}",
+          sum(days.values()) == 10 and days.get(shot) == 1 and days[makes_room] == base[makes_room] - 1, days)
+
+changes = {
+    "mountain": {"tele": ("core", 1), "wildlife": ("fullDay", 2), "slomo": ("extra", None)},
+    "falls": {"slomo": ("core", 2), "wide": ("core", 4), "wildlife": ("fullDay", 1), "walkaway": ("core", 1),
+              "silhouette": ("extra", None), "detail": ("core", 5), "ambient": ("core", 2)},
+    "beach": {"slomo": ("core", 2), "reflection": ("fullDay", 1)},
+    "city": {"bRoll": ("core", 7), "detail": ("core", 5), "food": ("core", 2), "follow": ("fullDay", 1),
+             "hyperlapse": ("fullDay", 1), "reveal": ("core", 1), "walkaway": ("core", 1), "silhouette": ("extra", None)},
+    "road": {"onTheWay": ("core", 4), "matchCut": ("core", 1), "timelapse": ("fullDay", 1), "reveal": ("core", 1),
+             "walkaway": ("core", 1), "slomo": ("extra", None)},
+    "snow": {"slomo": ("core", 2), "tele": ("core", 1)},
+}
+for trip_type, shots in changes.items():
+    got = {shot: (tier(shot, trip_type), target(shot, trip_type) if want[1] is not None else None)
+           for shot, want in shots.items()}
+    check(f"{trip_type}: " + ", ".join(f"{shot} {w[0]}" + (f" {w[1]}" if w[1] else "") for shot, w in shots.items()),
+          got == shots, got)
+changed = {(t, shot) for t in TYPES for shot in RAW
+           if (tier(shot, t), target(shot, t)) != (tier(shot, "general"), target(shot, "general"))}
+check("Nothing else changes from General's counts (TIMELAPSE's 2 in a city stays an extra)",
+      changed == {(t, shot) for t, shots in changes.items() for shot in shots} | {("city", "timelapse")},
+      sorted(changed - {(t, shot) for t, shots in changes.items() for shot in shots}))
+
+three = [clip("WIDE", r, in_shot=r == "human-scale") for r in ("establishing", "human-scale", "alternative")]
+general_wide = coverage(three, WIDE, 1, "general")
+falls_wide = coverage(three, WIDE, 1, "falls")
+check("At falls WIDE counts its vertical hero: the usual three are 3/3 on a general day, 3/4 at falls",
+      general_wide["complete"] and falls_wide["done"] == 3 and falls_wide["target"] == 4
+      and falls_wide["open"] == {"vertical-hero"}, falls_wide)
+check("…and the camera and Next go to it after Another angle (on a general day it stays optional)",
+      next_role("wide", "alternative", falls_wide["open"], "falls") == "vertical-hero"
+      and next_role("wide", "alternative", {"vertical-hero"}, "general") is None
+      and ("wide", None, "vertical-hero", "WIDE") in suggestions(three, 1, "falls"))
+hero = three + [clip("WIDE", "vertical-hero", existing=three)]
+check("Filmed, it fills WIDE at falls (4/4); on a general day it's an extra",
+      coverage(hero, WIDE, 1, "falls")["complete"]
+      and coverage(hero, WIDE, 1, "general")["statuses"][hero[-1].id] == "extra")
+check("ONE TAKE still can't fill the vertical hero, as it's upright",
+      not one_take_can_fill((("wide", None), 1, ["vertical-hero"])))
+
+kinds = [clip("BROLL", r) for r in ("atmosphere", "people", "movement", "local", "lens-angle", "transition")]
+city_broll = coverage(kinds, BROLL, 1, "city")
+check("City B-ROLL: the six kinds are 6/7, and a swap-in (the sun between the towers) makes 7",
+      city_broll["done"] == 6 and city_broll["target"] == 7
+      and next_role("bRoll", None, city_broll["open"], "city") == "nature"
+      and coverage(kinds + [clip("BROLL", "into-light")], BROLL, 1, "city")["complete"])
+check("General B-ROLL is still six kinds: a swap-in on top is an extra",
+      coverage(kinds + [clip("BROLL", "into-light")], BROLL, 1, "general")["done"] == 6)
 
 failed = [r for r in results if not r[1]]
 for name, ok, detail in results:

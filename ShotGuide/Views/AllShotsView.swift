@@ -116,7 +116,7 @@ struct ShotGuidePage: View {
                 Text("What you'd see")
             }
             Section {
-                ForEach(GuideWay.ways(for: slot)) { way in
+                ForEach(GuideWay.ways(for: slot, type: type)) { way in
                     GuideWayRow(way: way, shot: shot)
                 }
             } header: {
@@ -291,7 +291,8 @@ struct GuideWay: Identifiable {
     }
 
     /// The roles of a role shot, the versions of REVEAL and TALK, the one half of WHIP or HOME, or the shot itself.
-    static func ways(for slot: ShotSlot) -> [GuideWay] {
+    /// The day's type can make an optional role count, like WIDE's vertical hero at waterfalls (1.26).
+    static func ways(for slot: ShotSlot, type: TripType) -> [GuideWay] {
         let shot = slot.shot
         let usual = shot.defaultGroup == .inShot
 
@@ -319,7 +320,7 @@ struct GuideWay: Identifiable {
             }
         }
         if !shot.roles.isEmpty {
-            return shot.roles.map { role in
+            return shot.roles(for: type).map { role in
                 GuideWay(id: role.id, title: role.title, purpose: role.purpose,
                          note: role.isOptional ? "optional" : (role.isSubstitute ? "swap-in" : nil),
                          plans: plans(variant: 0, role: role.id, inShot: role.inShot))

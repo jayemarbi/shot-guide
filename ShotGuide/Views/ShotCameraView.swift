@@ -221,7 +221,7 @@ struct ShotCameraView: View {
         guard !shot.roles.isEmpty, fixedVariant == nil else { return }
         if let initialRole, shot.role(withID: initialRole) != nil {
             selectRole(initialRole)
-        } else if let next = shot.nextRole(after: nil, open: shotCoverage?.openRoleIDs ?? []) {
+        } else if let next = shot.nextRole(after: nil, open: shotCoverage?.openRoleIDs ?? [], type: tripType) {
             selectRole(next.id)
         }
     }
@@ -1877,7 +1877,7 @@ struct ShotCameraView: View {
             return
         }
         let finished = currentRole?.title
-        if let next = shot.nextRole(after: currentRole?.id, open: coverage.openRoleIDs) {
+        if let next = shot.nextRole(after: currentRole?.id, open: coverage.openRoleIDs, type: tripType) {
             selectRole(next.id)
             message = (finished.map { "\($0) done. " } ?? "") + "Next: \(next.title)."
         } else if coverage.complete {

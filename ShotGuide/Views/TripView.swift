@@ -305,7 +305,7 @@ struct TripView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Next: " + next.title)
                                     .font(.headline)
-                                Text(newPlace ? "A new place: establish it first." : nextHint(next))
+                                Text(newPlace ? "A new place: establish it first." : nextHint(next, type: trip.day(number).type))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
@@ -354,11 +354,12 @@ struct TripView: View {
         return ShotCameraView.listed(titles)
     }
 
-    private func nextHint(_ next: ShotSuggestion) -> String {
+    /// Under Next: the role's purpose, or what to film for the shot at this kind of place (1.26).
+    private func nextHint(_ next: ShotSuggestion, type: TripType) -> String {
         if let role = next.role.flatMap({ next.shot.role(withID: $0) }) {
             return role.purpose
         }
-        return next.shot.summary
+        return ShotSlot(shot: next.shot, half: next.half).summary(for: type)
     }
 
     /// What each level still needs, role by role.
