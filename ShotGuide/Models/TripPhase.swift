@@ -53,7 +53,7 @@ struct ShotSlot: Identifiable, Hashable {
     }
 
     func takeCount(in trip: Trip, day: Int) -> Int {
-        let takes = trip.clips.filter { $0.shot == shot.rawValue && $0.dayNumber == day }
+        let takes = trip.allTakes.filter { $0.shot == shot.rawValue && $0.dayNumber == day }
         guard let variantName else { return takes.count }
         return takes.filter { $0.variant == variantName }.count
     }
@@ -94,8 +94,9 @@ enum TripPhase: String, CaseIterable, Identifiable {
             return "Your first two minutes. Film REACTION before you've seen the view. REVEAL can zoom in, walk out from "
                 + "behind something or tilt up from the ground."
         case .atTheSpot:
-            return "You in the view, easiest first, down to the ones worth taking your time over. TALK can be on the "
-                + "tripod or walking, CLONE works best in shade, and SILHOUETTE needs the sun low behind you, so it's last."
+            return "You in the view, easiest first, down to the ones worth taking your time over. ONE TAKE films WIDE, "
+                + "WALKAWAY, MOMENT, MATCH CUT and CLONE from one tripod set-up. TALK can be on the tripod or walking, "
+                + "CLONE works best in shade, and SILHOUETTE needs the sun low behind you, so it's last."
         case .bRoll:
             return "The place without you, to fill out any reel. Grab these whenever you've got a spare minute, all day. "
                 + "REFLECTION needs still water, often first thing in the morning. TIMELAPSE ties up the phone, so save "
@@ -122,8 +123,8 @@ enum TripPhase: String, CaseIterable, Identifiable {
         case .firstLook:
             return [ShotSlot(shot: .reaction, half: nil), ShotSlot(shot: .reveal, half: nil)]
         case .atTheSpot:
-            let shots: [ShotType] = [.wide, .slomo, .talk, .walkaway, .tele, .matchCut, .moment, .orbit, .clone, .dance,
-                                     .silhouette]
+            let shots: [ShotType] = [.oneTake, .wide, .slomo, .talk, .walkaway, .tele, .matchCut, .moment, .orbit, .clone,
+                                     .dance, .silhouette]
             return shots.map { ShotSlot(shot: $0, half: nil) }
         case .bRoll:
             let shots: [ShotType] = [.bRoll, .detail, .reflection, .wildlife, .food, .sounds, .ambient, .timelapse]

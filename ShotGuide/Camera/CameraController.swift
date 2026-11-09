@@ -10,6 +10,9 @@ struct CaptureConfig: Equatable {
     var exposureBias: Float = 0
     /// DANCE: a song plays (in AirPods or on the speaker) while the phone's own mic records.
     var playsMusic: Bool = false
+    /// Shots you're in on the tripod: with headphones in, a voice says each step in your ear while the phone's own mic
+    /// records (1.24). The sound is set up as for DANCE, keeping stereo and wind reduction.
+    var speaksPrompts: Bool = false
 }
 
 struct RecordingResult {
@@ -75,6 +78,8 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var startProblem: String? = nil
     /// The file is actually recording (it can take a moment after recording is asked for).
     @Published private(set) var rolling = false
+    /// The zooms this camera can do, as shown on screen, like 0.5 to 15 (1.24).
+    @Published private(set) var zoomLimits: ClosedRange<Double> = 0.5...10
 
     let session = AVCaptureSession()
 
@@ -115,6 +120,8 @@ final class CameraController: NSObject, ObservableObject {
     private var lapseActive = false
     private var previewFront = false
     private var previewLog = false
+    /// MATCH CUT: looks for you in the preview frames (1.24). Used on dataQueue.
+    private var personFinder: PersonFinder?
 
     // MARK: Permissions
 
@@ -181,11 +188,14 @@ final class CameraController: NSObject, ObservableObject {
         }
         self.device = device
 
-        // With a song playing, the app sets up the sound itself so the song can go to AirPods in full quality
-        // while the phone's own mic records. Otherwise the camera sets it up.
-        session.automaticallyConfiguresApplicationAudioSession = !config.playsMusic
+        // With a song playing, or a voice to talk in your ear (1.24), the app sets up the sound itself so it can go to
+        // AirPods in full quality while the phone's own mic records. Otherwise the camera sets it up.
+        let playsToHeadphones = config.playsMusic || config.speaksPrompts
+        session.automaticallyConfiguresApplicationAudioSession = !playsToHeadphones
         if config.playsMusic {
             Self.prepareMusicAudioSession()
+        } else if config.speaksPrompts {
+            Self.preparePromptAudioSession()
         }
 
         if !isLapse,
@@ -327,7 +337,11 @@ final class CameraController: NSObject, ObservableObject {
         let label = Self.label(for: config.lens, device: device)
         let formatText = "\(Self.resolutionName(dimensions)) · " + (isLapse ? "Time-lapse" : "\(fps) fps") + (usingLog ? " · Log" : "")
         let torch = device.hasTorch
+        let multiplier = Self.displayMultiplier(device)
+        let lowest = Double(device.minAvailableVideoZoomFactor) * multiplier
+        let highest = max(lowest, Double(min(device.maxAvailableVideoZoomFactor, 40)) * multiplier)
         DispatchQueue.main.async {
+            self.zoomLimits = lowest...highest
             self.activeFPS = isLapse ? 30 : fps
             self.activeLog = usingLog
             self.logActive = usingLog
@@ -403,6 +417,26 @@ final class CameraController: NSObject, ObservableObject {
             do {
                 try device.lockForConfiguration()
                 device.videoZoomFactor = factor
+                device.unlockForConfiguration()
+            } catch {}
+            let zoom = Double(factor) * multiplier
+            DispatchQueue.main.async {
+                self.lensLabel = Self.formatZoom(zoom)
+                self.currentLens = nil
+                self.displayZoom = zoom
+            }
+        }
+    }
+
+    /// Zooms smoothly to an on-screen zoom, like 1.4x: MATCH CUT matching your size (1.24).
+    func rampZoom(toDisplay value: Double) {
+        sessionQueue.async {
+            guard let device = self.device else { return }
+            let multiplier = Self.displayMultiplier(device)
+            let factor = Self.clampZoom(CGFloat(value / multiplier), device: device)
+            do {
+                try device.lockForConfiguration()
+                device.ramp(toVideoZoomFactor: factor, withRate: 4)
                 device.unlockForConfiguration()
             } catch {}
             let zoom = Double(factor) * multiplier
@@ -551,6 +585,26 @@ final class CameraController: NSObject, ObservableObject {
         setTorch(true)
         sessionQueue.asyncAfter(deadline: .now() + 0.25) {
             self.setTorch(false)
+        }
+    }
+
+    /// The flash flickering fast for a few seconds: you're done, walk back to the phone (1.24).
+    func flickerTorch(seconds: Double = 3) {
+        let flashes = Int(seconds / 0.2)
+        for index in 0..<flashes {
+            sessionQueue.asyncAfter(deadline: .now() + Double(index) * 0.2) {
+                self.setTorch(true)
+            }
+            sessionQueue.asyncAfter(deadline: .now() + Double(index) * 0.2 + 0.1) {
+                self.setTorch(false)
+            }
+        }
+    }
+
+    /// Starts or stops looking for you in the preview, for MATCH CUT (1.24).
+    func setPersonFinder(_ finder: PersonFinder?) {
+        dataQueue.async {
+            self.personFinder = finder
         }
     }
 
@@ -793,6 +847,20 @@ final class CameraController: NSObject, ObservableObject {
         try? audio.setActive(true)
         if let builtIn = audio.availableInputs?.first(where: { $0.portType == .builtInMic }) {
             try? audio.setPreferredInput(builtIn)
+        }
+    }
+
+    /// The shots you're in on the tripod (1.24): the voice plays to AirPods in full quality, or nowhere without them, and
+    /// the clip records from a mic you've plugged in, or else the phone's own. AirPods only ever play this way, so their
+    /// mic is never the one recording.
+    static func preparePromptAudioSession() {
+        let audio = AVAudioSession.sharedInstance()
+        try? audio.setCategory(.playAndRecord, mode: .videoRecording, options: [.allowBluetoothA2DP, .defaultToSpeaker])
+        try? audio.setActive(true)
+        let inputs = audio.availableInputs ?? []
+        let plugged = inputs.first { $0.portType == .usbAudio || $0.portType == .headsetMic }
+        if let input = plugged ?? inputs.first(where: { $0.portType == .builtInMic }) {
+            try? audio.setPreferredInput(input)
         }
     }
 
@@ -1057,6 +1125,9 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         if let frame = CMSampleBufferGetImageBuffer(sampleBuffer) {
             LookRenderer.shared.renderPreview(frame, orientation: Self.upright(connection, front: previewFront), log: previewLog)
+            if output === previewOutput, let finder = personFinder {
+                finder.process(frame)
+            }
         }
         guard output === dataOutput, lapseActive, let input = writerInput, let adaptor else { return }
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)

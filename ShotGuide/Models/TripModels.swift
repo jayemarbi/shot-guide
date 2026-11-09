@@ -70,6 +70,10 @@ struct Clip: Codable, Identifiable, Hashable {
     /// Your verdict after looking at the take: true is Usable (and overrides a failed take check), false is Not
     /// usable. nil until you say, when a technically fine take counts provisionally.
     var usable: Bool? = nil
+    /// ONE TAKE (1.24): its parts, each a take of its own shot. nil for every other clip.
+    var parts: [ClipPart]? = nil
+    /// For a ONE TAKE's part, worked out from the clip and never saved: the clip it's part of.
+    var partOf: UUID? = nil
 
     static let appleLog = "Apple Log"
     static let normalColour = "Normal"
@@ -122,6 +126,13 @@ struct Clip: Codable, Identifiable, Hashable {
     var isAudio: Bool {
         (fileName as NSString).pathExtension.lowercased() == "m4a"
     }
+}
+
+/// The shots skipped on a day's Next row (1.24). They come back after your next take.
+struct SkippedNext: Codable, Hashable {
+    var day: Int
+    /// ShotSuggestion.skipKey of each, in the order you skipped them.
+    var keys: [String]
 }
 
 /// Details about the place, for text on screen and "things to know before you go" reels.
@@ -197,6 +208,8 @@ struct Trip: Codable, Identifiable, Hashable {
     var days: [TripDay]? = nil
     /// Your choice for the next clip: start a new scene, or stay in the last one (1.19).
     var nextScene: SceneChoice? = nil
+    /// Shots you've skipped on the Next row since your last take (1.24).
+    var skippedNext: SkippedNext? = nil
 
     var regionLine: String {
         [state, country].filter { !$0.isEmpty }.joined(separator: ", ")
@@ -246,7 +259,7 @@ struct Trip: Codable, Identifiable, Hashable {
     }
 
     func takeCount(of shot: ShotType, day number: Int) -> Int {
-        clips.filter { $0.shot == shot.rawValue && $0.dayNumber == number }.count
+        allTakes.filter { $0.shot == shot.rawValue && $0.dayNumber == number }.count
     }
 
     /// The everyday coverage a day asks for: the core shots, counted role by role (see `dayCoverage`).

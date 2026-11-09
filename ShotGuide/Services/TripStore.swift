@@ -177,7 +177,8 @@ final class TripStore: ObservableObject {
 
     func nextTake(tripID: UUID, shotName: String, day: Int) -> Int {
         guard let trip = self.trip(id: tripID) else { return 1 }
-        return (trip.clips.filter { $0.shot == shotName && $0.dayNumber == day }.map { $0.take }.max() ?? 0) + 1
+        // ONE TAKE's parts are takes of their shots too (1.24).
+        return (trip.allTakes.filter { $0.shot == shotName && $0.dayNumber == day }.map { $0.take }.max() ?? 0) + 1
     }
 
     /// Where the next clip goes, named the playbook way: Place_YYYY-MM-DD_SHOT_##.mov, with the clip's name on
@@ -362,6 +363,31 @@ final class TripStore: ObservableObject {
     func addClip(_ clip: Clip, to tripID: UUID) {
         guard var trip = self.trip(id: tripID) else { return }
         trip.clips.append(clip)
+        // Shots skipped on the Next row come back after your next take (1.24).
+        if trip.skippedNext?.day == clip.dayNumber {
+            trip.skippedNext = nil
+        }
+        replace(trip)
+    }
+
+    /// Skips a shot on a day's Next row (1.24): the next one comes forward, and this one is back after your next take.
+    func skipNext(_ key: String, day: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        var skipped = (trip.skippedNext?.day == day ? trip.skippedNext : nil) ?? SkippedNext(day: day, keys: [])
+        if !skipped.keys.contains(key) {
+            skipped.keys.append(key)
+        }
+        // Everything skipped: start again from the top.
+        let left = trip.nextSuggestions(day: day).filter { !skipped.keys.contains($0.skipKey) }
+        trip.skippedNext = left.isEmpty ? nil : skipped
+        replace(trip)
+    }
+
+    /// Your verdict on one part of a ONE TAKE (1.24): Usable, Not usable, or nil for not checked.
+    func setPartVerdict(_ usable: Bool?, partID: UUID, clipID: UUID, tripID: UUID) {
+        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }),
+              let partIndex = trip.clips[index].parts?.firstIndex(where: { $0.id == partID }) else { return }
+        trip.clips[index].parts?[partIndex].usable = usable
         replace(trip)
     }
 
@@ -689,15 +715,27 @@ final class TripStore: ObservableObject {
         "profile", "white_balance_k", "tint", "iso", "shutter",
         "orientation",
         // Creative coverage (1.19), added at the end so the columns before keep their places.
-        "role", "role_name", "purpose", "scene", "scene_name", "scene_status", "planned_s", "usable", "coverage"
+        "role", "role_name", "purpose", "scene", "scene_name", "scene_status", "planned_s", "usable", "coverage",
+        // ONE TAKE (1.24): a row for each part, with the same file, and where the part starts and ends in it.
+        "part_of", "part", "part_start_s", "part_end_s"
     ]
 
     static func catalogCSV(for trip: Trip) -> String {
         var lines = [catalogColumns.joined(separator: ",")]
         let coverage = trip.coverageByClip()
         for clip in trip.clips.sorted(by: { $0.recordedAt < $1.recordedAt }) {
-            lines.append(catalogRow(clip, trip: trip, coverage: coverage[clip.id] ?? ClipCoverageInfo())
+            let info = coverage[clip.id] ?? ClipCoverageInfo()
+            lines.append((catalogRow(clip, trip: trip, coverage: info) + ["", "", "", ""])
                 .map { csvField($0) }.joined(separator: ","))
+            // A ONE TAKE: then each part, as the take of its shot it counts as, in the same file.
+            for part in clip.parts ?? [] {
+                var partInfo = info
+                partInfo.status = coverage[part.id]?.status
+                let partColumns = [clip.shot + " " + String(clip.take), part.title, String(format: "%.1f", part.start),
+                                   String(format: "%.1f", part.end)]
+                lines.append((catalogRow(clip.partTake(part), trip: trip, coverage: partInfo) + partColumns)
+                    .map { csvField($0) }.joined(separator: ","))
+            }
         }
         // The byte-order mark makes Excel on Windows read accents correctly.
         return "\u{FEFF}" + lines.joined(separator: "\r\n") + "\r\n"

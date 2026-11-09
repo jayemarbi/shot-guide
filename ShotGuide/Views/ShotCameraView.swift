@@ -4,7 +4,8 @@ import SwiftUI
 import UIKit
 
 /// Films one shot. Phone-in-hand shots get live prompts; in-the-shot shots get a timeline,
-/// a countdown (with the flash blinking for the last 3 seconds), a clean screen and an instant replay.
+/// a countdown (with the flash blinking for the last 5 seconds), a clean screen and an instant replay. On the tripod,
+/// 5 flashes lead into each new step while it records, and a fast flicker means walk back (1.24).
 struct ShotCameraView: View {
     let tripID: UUID
     let shot: ShotType
@@ -50,19 +51,17 @@ struct ShotCameraView: View {
     /// Golden or blue hour when the white balance was last set between takes.
     @State private var lockedGlow: SunCalc.Glow? = nil
     @State private var micName = ""
-    /// MATCH CUT: a still of the last one, and the zoom it used.
-    @State private var ghost: UIImage? = nil
-    @State private var ghostZoom: Double? = nil
-    @State private var zoomRestored = false
-    @State private var firedCues: Set<Int> = []
+    /// The flashes and voice while you're in the shot, ONE TAKE's parts and MATCH CUT finding your size (1.24).
+    @StateObject private var director = TakeDirector()
+    /// ONE TAKE: the parts, their lengths and MATCH CUT's move, remembered between takes.
+    @State private var oneTakeSetup = OneTakeSetup.load()
+    /// Bumped when MATCH CUT's size for a move is cleared, to redraw.
+    @State private var sizeVersion = 0
     @State private var takeMotion: TakeMotion? = nil
     /// White balance, ISO and shutter as the take started.
     @State private var takeSettings: TakeSettings? = nil
     @State private var startZoom: Double = 1
     @State private var reviewNote: String? = nil
-    @State private var thermal: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
-    @State private var battery: Float = -1
-    @State private var charging = false
     /// DANCE: where in the song the next take starts, the song's position when the last take started recording,
     /// and where the song plays (AirPods or the phone's speaker).
     @State private var danceStart: DanceStart = .fromTop
@@ -93,7 +92,16 @@ struct ShotCameraView: View {
 
     /// The version for the next take: the half you picked on the trip page, or the shot's usual pattern.
     private func variantFor(take: Int) -> Int {
-        fixedVariant ?? shot.defaultVariant(forTake: take)
+        if shot == .matchCut && fixedVariant == nil {
+            // The move you did last, so you keep repeating it from place to place (1.24).
+            return MatchCutStore.lastMove.rawValue
+        }
+        return fixedVariant ?? shot.defaultVariant(forTake: take)
+    }
+
+    /// MATCH CUT's move for this take.
+    private var currentMove: MatchMove {
+        MatchMove(rawValue: variant) ?? .runAcross
     }
 
     private var plan: ShotPlan {
@@ -101,6 +109,11 @@ struct ShotCameraView: View {
         // 60 fps lets an edit slow movement down, but it needs light. Once the sun is down, 30 fps looks better.
         if lowLight && plan.fps == 60 {
             plan.fps = 30
+        }
+        if shot == .oneTake {
+            // Your parts and lengths (1.24).
+            plan.steps = oneTakeSetup.steps()
+            plan.manualLength = oneTakeSetup.total
         }
         let type = tripType
         plan.exposureBias = plan.exposure == .silhouette ? -1.7 : type.exposureBias
@@ -127,12 +140,15 @@ struct ShotCameraView: View {
     }
 
     private var isBusy: Bool {
-        camera.phase == .recording || camera.phase == .finishing || countdownRemaining != nil
+        camera.phase == .recording || camera.phase == .finishing || countdownRemaining != nil || director.isFinding
     }
 
     private var takeLabel: String {
-        if shot == .dance {
+        if shot == .dance || shot == .oneTake {
             return "take \(take)"
+        }
+        if shot == .matchCut {
+            return "\(currentMove.title) · take \(take)"
         }
         if fixedVariant != nil, let half = plan.variantName {
             return shot.isTransition ? "\(half) half" : half.lowercased()
@@ -166,6 +182,12 @@ struct ShotCameraView: View {
     /// The roles covered at the place you're at, for the shots tracked at each place, or today otherwise and when
     /// the day has been at one place. A second waterfall gets its own set while the day's counts carry on.
     private func roleCoverage(in trip: Trip) -> SlotCoverage {
+        coverageHere(of: shot, in: trip)
+    }
+
+    /// Any shot's roles where you are: at the place for the shots tracked at each place, or today. ONE TAKE fills its
+    /// parts' roles from these (1.24).
+    private func coverageHere(of shot: ShotType, in trip: Trip) -> SlotCoverage {
         let slot = ShotSlot(shot: shot, half: nil)
         if shot.perPlace, let place = placeNow(in: trip) {
             return trip.coverage(for: slot, day: day, at: place)
@@ -237,23 +259,171 @@ struct ShotCameraView: View {
         }
     }
 
-    /// Heat and battery, shown above the camera controls when they could cut a take short.
-    private var warningText: String? {
-        if thermal == .critical {
-            return "The phone is too hot to film well. Let it cool in the shade for a few minutes."
+    // MARK: MATCH CUT and ONE TAKE (1.24)
+
+    /// MATCH CUT's moves, with the one you're on highlighted.
+    private func movePicker(_ moves: [MatchMove]) -> some View {
+        moveChips(moves, selected: currentMove) { move in
+            variant = move.rawValue
         }
-        if thermal == .serious {
-            return "The phone is getting hot and recording may stop. Shade it between takes."
+    }
+
+    /// One chip per move, each with how many places you've filmed it at across every trip, so you can see your set
+    /// growing.
+    private func moveChips(_ moves: [MatchMove], selected: MatchMove, choose: @escaping (MatchMove) -> Void) -> some View {
+        let trips = store.trips
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(moves) { move in
+                    let places = move.places(in: trips)
+                    let isOn = move == selected
+                    let spoken: String = places == 0 ? move.title
+                        : "\(move.title), filmed at \(places) \(places == 1 ? "place" : "places")"
+                    Button {
+                        choose(move)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(move.title)
+                            if places > 0 {
+                                Text("\(places)")
+                                    .font(.caption.weight(.bold).monospacedDigit())
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 1)
+                                    .background((isOn ? Color.black : Color.white).opacity(0.18), in: Capsule())
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(isOn ? Color.orange : Color.black.opacity(0.5), in: Capsule())
+                        .foregroundStyle(isOn ? Color.black : Color.white)
+                    }
+                    .accessibilityLabel(spoken)
+                }
+            }
+            .padding(.horizontal, 2)
         }
-        guard battery >= 0, !charging else { return nil }
-        let percent = Int((battery * 100).rounded())
-        if (shot == .timelapse || shot == .hyperlapse) && battery < 0.25 {
-            return "Battery at \(percent)%. A long \(shot.title) needs more, so plug in a power bank."
+    }
+
+    /// MATCH CUT: the size it zooms you to for this move, set by your first take of it, and starting it again.
+    @ViewBuilder
+    private var matchCutSizeRow: some View {
+        let _ = sizeVersion
+        let move = currentMove
+        if let size = MatchCutStore.size(for: move) {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("It zooms until you're the size you were in your first \(move.title): "
+                      + "\(Int((size * 100).rounded()))% of the frame's height.", systemImage: "person.crop.rectangle")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.85))
+                Button("New size: let this take set it") {
+                    MatchCutStore.setSize(nil, for: move)
+                    sizeVersion += 1
+                }
+                .font(.subheadline.weight(.semibold))
+                .tint(.orange)
+            }
+        } else {
+            Label("Your first \(move.title) sets your size. Every take after it zooms until you're that size again.",
+                  systemImage: "person.crop.rectangle")
+                .font(.subheadline)
+                .foregroundStyle(Color.white.opacity(0.85))
         }
-        if battery < 0.1 {
-            return "Battery at \(percent)%. The cold drains it faster, so keep the phone in a warm pocket between shots."
+    }
+
+    /// What each part you're filming counts as where you are.
+    private var oneTakeFills: [OneTakeFill] {
+        guard let trip = store.trip(id: tripID) else { return [] }
+        return trip.oneTakePlan(oneTakeSetup.parts, day: day, at: placeNow(in: trip))
+    }
+
+    /// ONE TAKE's parts: tap the circle to leave one out or put it back, the time to change how long it runs, and
+    /// MATCH CUT's move. Remembered for next time.
+    private var oneTakePartsEditor: some View {
+        let fills = oneTakeFills
+        return VStack(alignment: .leading, spacing: 14) {
+            ForEach(OneTakePart.allCases) { part in
+                oneTakePartRow(part, fill: fills.first { $0.part == part })
+            }
+            Text(oneTakeTotalLine)
+                .font(.footnote)
+                .foregroundStyle(Color.white.opacity(0.7))
         }
-        return nil
+    }
+
+    private func oneTakePartRow(_ part: OneTakePart, fill: OneTakeFill?) -> some View {
+        let included = oneTakeSetup.includes(part)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    oneTakeSetup.toggle(part)
+                    oneTakeSetup.save()
+                } label: {
+                    Image(systemName: included ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(included ? Color.orange : Color.white.opacity(0.5))
+                }
+                .accessibilityLabel(included ? "Leave out \(part.title)" : "Put back \(part.title)")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(part == .matchCut ? "MATCH CUT · \(oneTakeSetup.matchMove.title)" : part.title)
+                        .font(.headline)
+                    Text(oneTakeFillLine(fill, included: included))
+                        .font(.caption)
+                        .foregroundStyle(included && fill?.adds == true ? Color.green : Color.white.opacity(0.6))
+                }
+                Spacer(minLength: 8)
+                if included {
+                    Menu {
+                        ForEach(OneTakePart.lengthChoices, id: \.self) { seconds in
+                            Button(clockString(seconds)) {
+                                oneTakeSetup.lengths[part.rawValue] = seconds
+                                oneTakeSetup.save()
+                            }
+                        }
+                    } label: {
+                        Text(clockString(oneTakeSetup.length(of: part)))
+                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.12), in: Capsule())
+                    }
+                    .accessibilityLabel("\(part.title) runs \(clockString(oneTakeSetup.length(of: part)))")
+                }
+            }
+            if included {
+                Text(part.doing(move: oneTakeSetup.matchMove))
+                    .font(.footnote)
+                    .foregroundStyle(Color.white.opacity(0.75))
+                if part == .matchCut {
+                    moveChips(MatchMove.allCases.filter { $0.fitsOneTake }, selected: oneTakeSetup.matchMove) { move in
+                        oneTakeSetup.move = move.rawValue
+                        oneTakeSetup.save()
+                    }
+                }
+            }
+        }
+        .opacity(included ? 1 : 0.6)
+    }
+
+    /// "Counts as WIDE · Establishing", or what it'll be if that's filmed here already.
+    private func oneTakeFillLine(_ fill: OneTakeFill?, included: Bool) -> String {
+        guard included else { return "Left out this time" }
+        guard let fill else { return "" }
+        return fill.adds ? "Counts as \(fill.title)" : "\(fill.title), an extra here"
+    }
+
+    /// "About 6:00 before you walk back, roughly 2.7 GB."
+    private var oneTakeTotalLine: String {
+        let total = oneTakeSetup.total
+        // Roughly how much a minute of 4K takes on the phone.
+        let perMinute = plan.fps >= 60 ? 0.45 : 0.2
+        let gigabytes = total / 60 * perMinute
+        var line = "About \(clockString(total)) before you walk back, roughly \(String(format: "%.1f", gigabytes)) GB. "
+            + "It keeps rolling after that until you stop it."
+        if let minutes = store.minutesOfVideoLeft, Double(minutes) * 0.2 < gigabytes {
+            line += " That's more than the space left on the phone, so copy a trip to your SSD first."
+        }
+        return line
     }
 
     /// Changes to timing are remembered for this shot.
@@ -268,6 +438,10 @@ struct ShotCameraView: View {
 
     /// The timeline fitted to how this take will end, plus the extra seconds as their own step.
     private var displaySteps: [GuideStep] {
+        if shot == .oneTake {
+            // As it goes: where each part really started, as your remote can move you on early (1.24).
+            return (camera.phase == .recording ? director.liveSteps(now: camera.elapsed) : nil) ?? plan.steps
+        }
         var steps = plan.timeline(endingAt: timing.stopsByItself ? timing.length : nil)
         if hasExtra {
             let text = plan.isInShot
@@ -282,13 +456,26 @@ struct ShotCameraView: View {
         let buttons = plan.lens == .front
             ? "Start with the red button or a volume button."
             : "Start with the red button, a volume button or your Bluetooth remote."
+        if shot == .matchCut {
+            return buttons + " The light stays on while it finds you and goes off once you're framed. Then 5 flashes, and "
+                + "it's rolling. If it can't find you, your remote starts it at the size you are."
+        }
+        var hint = buttons
         if timing.countdown == 0 {
-            return buttons + " Recording starts straight away."
+            hint += " Recording starts straight away."
+        } else if plan.lens != .front && plan.isInShot {
+            hint += " The flash blinks 5 times, one a second, before recording starts."
         }
-        if plan.lens == .front {
-            return buttons
+        if shot == .oneTake {
+            hint += " 5 flashes lead into each part, and a fast flicker after the last one means walk back. Your remote "
+                + "moves you on to the next part whenever you're ready."
+        } else if plan.signalsDuringTake {
+            hint += " While it records, 5 flashes lead into each new step, and a fast flicker means you're done."
         }
-        return buttons + " The flash blinks for the last 3 seconds before recording starts."
+        if plan.signalsDuringTake {
+            hint += " With AirPods in, you'll hear what's next too."
+        }
+        return hint
     }
 
     var body: some View {
@@ -313,7 +500,7 @@ struct ShotCameraView: View {
                 onDrag: { distance in
                     camera.nudgeExposure(by: Float(-distance / 250))
                 },
-                onButton: { recordTapped() },
+                onButton: { remotePressed() },
                 onSecondaryButton: {
                     if camera.phase == .recording {
                         markMoment()
@@ -398,19 +585,19 @@ struct ShotCameraView: View {
                 loadSong()
                 danceStart = carryOnPoint == nil ? .fromTop : .carryOn
             }
-            .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
-                DispatchQueue.main.async { thermal = ProcessInfo.processInfo.thermalState }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
-                readBattery()
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in
-                readBattery()
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                // Leaving the app: the screen's brightness goes back to yours.
+                ScreenDimmer.restore()
             }
             .onChange(of: camera.phase) { oldPhase, phase in
                 if oldPhase == .recording {
-                    // The take has ended: sum up the shake and tilt before the phone gets lowered.
-                    takeMotion = level.endTake()
+                    // The take has ended: no more signals, and the screen comes back up (1.24).
+                    director.takeEnded()
+                    ScreenDimmer.restore()
+                    // Sum up the shake and tilt before the phone gets lowered. A ONE TAKE did it as you set off back.
+                    if takeMotion == nil {
+                        takeMotion = level.endTake()
+                    }
                     if shot == .dance && songStartAtRecording == nil, let heard = song.heardPosition {
                         // The song hadn't started when recording did: work it out from where it is now.
                         songStartAtRecording = max(0, heard - camera.elapsed)
@@ -549,6 +736,8 @@ struct ShotCameraView: View {
             }
             if !shot.roles.isEmpty && fixedVariant == nil {
                 rolePicker
+            } else if shot == .matchCut {
+                movePicker(MatchMove.allCases)
             } else if !shot.variants.isEmpty && fixedVariant == nil {
                 Picker("Version", selection: $variant) {
                     ForEach(shot.variants.indices, id: \.self) { index in
@@ -576,7 +765,10 @@ struct ShotCameraView: View {
 
     @ViewBuilder
     private var centreOverlay: some View {
-        if camera.phase == .recording {
+        if director.isFinding && camera.phase != .recording {
+            notice("Finding you: stand where you'll do it, facing the phone. The light goes off once you're framed. "
+                + "Tap the button to cancel.")
+        } else if camera.phase == .recording {
             if plan.timelapseInterval != nil {
                 lapseTimer
             } else if !camera.rolling {
@@ -708,10 +900,12 @@ struct ShotCameraView: View {
             .padding(.horizontal, 24)
     }
 
-    /// Whether a take's prompt is showing: while you film a shot you're holding (not one you're in, or a time-lapse,
-    /// which has its own clock in the middle).
+    /// Whether a take's prompt is showing: whenever you can see the screen while you film. That's the shots you're
+    /// holding, and since 1.24 the ones on the front camera (TALK), REACTION once it's turned round to the view, and
+    /// ONE TAKE while you're behind the phone. Not a time-lapse, which has its own clock in the middle.
     private var showsPrompt: Bool {
-        camera.phase == .recording && camera.rolling && !plan.isInShot && plan.timelapseInterval == nil
+        camera.phase == .recording && camera.rolling && plan.timelapseInterval == nil
+            && (!plan.isInShot || plan.lens == .front || shot == .reaction || shot == .oneTake)
     }
 
     /// The step to do now while you film a shot you're holding sideways (1.23): small, along the top of the frame as
@@ -797,14 +991,6 @@ struct ShotCameraView: View {
         VStack(spacing: 14) {
             if shot == .dance && !isBusy {
                 songPanel
-            }
-            if let warningText, !isBusy || thermal == .critical {
-                Label(warningText, systemImage: thermal == .nominal || thermal == .fair ? "battery.25" : "thermometer.sun.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .multilineTextAlignment(.leading)
-                    .padding(10)
-                    .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
-                    .foregroundStyle(Color.orange)
             }
             if let markNote {
                 Label(markNote, systemImage: "star.fill")
@@ -894,6 +1080,18 @@ struct ShotCameraView: View {
                             .padding(.vertical, 6)
                             .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
                         }
+                    } else if shot == .oneTake && camera.phase == .recording && director.run?.walkBackAt == nil {
+                        // The same as your remote: on to the next part (1.24).
+                        Button {
+                            _ = director.remoteNext(at: camera.elapsed)
+                        } label: {
+                            Label("Next part", systemImage: "forward.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.black.opacity(0.5), in: Capsule())
+                        }
                     } else {
                         Color.clear
                     }
@@ -907,7 +1105,7 @@ struct ShotCameraView: View {
         .sheet(isPresented: $showTiming) {
             NavigationStack {
                 Form {
-                    TimingControls(timing: timingBinding)
+                    TimingControls(timing: timingBinding, showsStopping: shot != .oneTake)
                 }
                 .navigationTitle("\(shot.title) timing")
                 .navigationBarTitleDisplayMode(.inline)
@@ -928,7 +1126,7 @@ struct ShotCameraView: View {
                 Circle()
                     .strokeBorder(Color.white, lineWidth: 4)
                     .frame(width: 80, height: 80)
-                if camera.phase == .recording || countdownRemaining != nil {
+                if camera.phase == .recording || countdownRemaining != nil || director.isFinding {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.red)
                         .frame(width: 32, height: 32)
@@ -973,6 +1171,11 @@ struct ShotCameraView: View {
                             Text(role.purpose)
                                 .foregroundStyle(Color.white.opacity(0.85))
                         }
+                    } else if shot == .matchCut {
+                        movePicker(MatchMove.allCases)
+                        Text(currentMove.summary + ". " + currentMove.cut)
+                            .foregroundStyle(Color.white.opacity(0.85))
+                        matchCutSizeRow
                     } else if !shot.variants.isEmpty && fixedVariant == nil {
                         Picker("Version", selection: $variant) {
                             ForEach(shot.variants.indices, id: \.self) { index in
@@ -990,15 +1193,20 @@ struct ShotCameraView: View {
                         Text(placement)
                             .foregroundStyle(Color.white.opacity(0.8))
                     }
-                    cardHeading("Walkthrough")
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(displaySteps, id: \.self) { step in
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Text(step.rangeLabel)
-                                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                                    .foregroundStyle(Color.orange)
-                                    .frame(width: 84, alignment: .leading)
-                                Text(step.text)
+                    if shot == .oneTake {
+                        cardHeading("Parts")
+                        oneTakePartsEditor
+                    } else {
+                        cardHeading("Walkthrough")
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(displaySteps, id: \.self) { step in
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text(step.rangeLabel)
+                                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                                        .foregroundStyle(Color.orange)
+                                        .frame(width: 84, alignment: .leading)
+                                    Text(step.text)
+                                }
                             }
                         }
                     }
@@ -1023,7 +1231,7 @@ struct ShotCameraView: View {
                         Toggle("I'm in this shot", isOn: $inShot)
                             .tint(.orange)
                     }
-                    TimingControls(timing: timingBinding)
+                    TimingControls(timing: timingBinding, showsStopping: shot != .oneTake)
                         .padding(12)
                         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
                     Text(startHint)
@@ -1108,11 +1316,8 @@ struct ShotCameraView: View {
         timing = TimingStore.load(shot, plan: plan)
         showBriefing = plan.isInShot || !HowItWorks.seen(shot, role: currentRole?.id)
         level.start()
-        UIDevice.current.isBatteryMonitoringEnabled = true
-        readBattery()
-        if shot == .matchCut {
-            loadGhost()
-        }
+        director.attach(camera)
+        director.voice.enabled = plan.signalsDuringTake
         if shot == .dance {
             loadSong()
             danceStart = carryOnPoint == nil ? .fromTop : .carryOn
@@ -1133,28 +1338,19 @@ struct ShotCameraView: View {
 
     private func finish() {
         cancelCountdown()
+        director.takeEnded()
+        director.voice.stop()
         if camera.phase == .recording {
             camera.stopRecording()
         }
         camera.stop()
         level.stop()
-        UIDevice.current.isBatteryMonitoringEnabled = false
+        ScreenDimmer.restore()
         UIApplication.shared.isIdleTimerDisabled = false
     }
 
-    private func readBattery() {
-        let device = UIDevice.current
-        battery = device.batteryLevel
-        charging = device.batteryState == .charging || device.batteryState == .full
-    }
-
-    /// Each time the camera is ready: put MATCH CUT's zoom back where the last one was, and set the white balance for
-    /// golden and blue hour.
+    /// Each time the camera is ready: set the white balance for golden and blue hour.
     private func cameraReady() {
-        if let ghostZoom, !zoomRestored {
-            zoomRestored = true
-            camera.setZoom(display: ghostZoom)
-        }
         lockedGlow = glowNow
         camera.setDaylightLock(lockedGlow != nil)
     }
@@ -1174,65 +1370,15 @@ struct ShotCameraView: View {
         camera.setDaylightLock(glow != nil)
     }
 
-    /// MATCH CUT: the most recent one on the phone, from any trip, as a see-through still and its zoom.
-    private func loadGhost() {
-        var newest: (clip: Clip, trip: Trip)? = nil
-        for trip in store.trips {
-            for clip in trip.clips where clip.shot == ShotType.matchCut.rawValue && clip.isOnPhone {
-                if let current = newest, current.clip.recordedAt >= clip.recordedAt {
-                    continue
-                }
-                newest = (clip, trip)
-            }
-        }
-        guard let latest = newest else { return }
-        ghostZoom = latest.clip.zoom
-        let url = store.clipURL(latest.clip, in: latest.trip)
-        Task { @MainActor in
-            ghost = await Self.still(of: url, at: 3)
-        }
-    }
-
-    private static func still(of url: URL, at seconds: Double) async -> UIImage? {
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 1920, height: 1920)
-        guard let result = try? await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600)) else { return nil }
-        return UIImage(cgImage: result.image)
-    }
-
     // MARK: Guides drawn over the picture for some creative shots
 
     @ViewBuilder
     private var shotGuideOverlay: some View {
         switch plan.overlay {
-        case .ghost?:
-            ghostOverlay
         case .crosshair?:
             crosshair
         case nil:
             EmptyView()
-        }
-    }
-
-    /// The last MATCH CUT, see-through, while the phone is held the same way it was filmed: a wide one shows
-    /// once the phone is sideways, turned to sit on the picture.
-    @ViewBuilder
-    private var ghostOverlay: some View {
-        if let ghost, camera.phase != .recording, (ghost.size.width > ghost.size.height) == level.hold.isSideways {
-            GeometryReader { geometry in
-                let size = geometry.size
-                let sideways = level.hold.isSideways
-                Image(uiImage: ghost)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: sideways ? size.height : size.width, height: sideways ? size.width : size.height)
-                    .clipped()
-                    .rotationEffect(.degrees(level.hold.screenRotation))
-                    .position(x: size.width / 2, y: size.height / 2)
-            }
-            .opacity(0.35)
-            .ignoresSafeArea()
         }
     }
 
@@ -1252,6 +1398,7 @@ struct ShotCameraView: View {
 
     private func planChanged() {
         timing = TimingStore.load(shot, plan: plan)
+        director.voice.enabled = plan.signalsDuringTake
         showBriefing = plan.isInShot || !HowItWorks.seen(shot, role: currentRole?.id)
         if cameraAllowed {
             camera.configure(plan.captureConfig)
@@ -1275,6 +1422,10 @@ struct ShotCameraView: View {
             cancelCountdown()
             return
         }
+        if director.isFinding && camera.phase != .recording {
+            cancelFinding()
+            return
+        }
         switch camera.phase {
         case .recording:
             camera.stopRecording()
@@ -1287,7 +1438,13 @@ struct ShotCameraView: View {
             }
             message = nil
             showBriefing = false
-            if timing.countdown > 0 {
+            if plan.dimsScreen {
+                // Nobody's looking at it from here, and a bright screen heats the phone (1.24).
+                ScreenDimmer.dim()
+            }
+            if shot == .matchCut {
+                startFinding()
+            } else if timing.countdown > 0 {
                 startCountdown()
             } else {
                 startSong(lead: 0)
@@ -1298,17 +1455,59 @@ struct ShotCameraView: View {
         }
     }
 
+    /// Volume up or your Bluetooth remote: the same as the red button, except that in a ONE TAKE it moves you on to
+    /// the next part (and stops the take after the last one), and while MATCH CUT is finding you it starts at the size
+    /// you are (1.24).
+    private func remotePressed() {
+        if director.isFinding && camera.phase != .recording {
+            director.goAnyway()
+            return
+        }
+        if shot == .oneTake && camera.phase == .recording {
+            if !director.remoteNext(at: camera.elapsed) {
+                camera.stopRecording()
+            }
+            return
+        }
+        recordTapped()
+    }
+
+    /// MATCH CUT: with the light on, finds you and zooms until you're the size you were in your first take of the move,
+    /// then the light goes off and the countdown starts (1.24). Your first take sets the size.
+    private func startFinding() {
+        let move = currentMove
+        MatchCutStore.lastMove = move
+        director.voice.say("Stand where you'll do it, facing the phone.")
+        director.startFinding(move: move, zooms: true, hold: level.hold) { size in
+            if MatchCutStore.size(for: move) == nil, let size {
+                MatchCutStore.setSize(size, for: move)
+                sizeVersion += 1
+            }
+            director.voice.say("Got you.")
+            startCountdown()
+        }
+    }
+
+    private func cancelFinding() {
+        director.stopFinding()
+        ScreenDimmer.restore()
+    }
+
     private func startCountdown() {
         showBriefing = false
         let total = max(timing.countdown, 1)
         startSong(lead: Double(total))
-        // The flash tells you when recording starts if you're in front of the phone.
+        // The flash tells you when recording starts if you're in front of the phone: 5 blinks, one a second (1.24).
         let useFlash = plan.isInShot && plan.lens != .front && camera.hasTorch
+        let speaks = plan.signalsDuringTake
         countdownTask?.cancel()
         countdownTask = Task { @MainActor in
             for remaining in stride(from: total, through: 1, by: -1) {
                 countdownRemaining = remaining
-                if useFlash && remaining <= 3 {
+                if speaks && remaining == min(total, 5) {
+                    director.voice.say(remaining == 5 ? "Recording in five" : "Recording in \(remaining)")
+                }
+                if useFlash && remaining <= 5 {
                     camera.setTorch(true)
                     try? await Task.sleep(nanoseconds: 200_000_000)
                     camera.setTorch(false)
@@ -1333,6 +1532,7 @@ struct ShotCameraView: View {
         countdownRemaining = nil
         camera.setTorch(false)
         song.stop()
+        ScreenDimmer.restore()
     }
 
     private func beginRecording() {
@@ -1346,7 +1546,6 @@ struct ShotCameraView: View {
         let coordinate = location.location?.coordinate
         zoomStarted = false
         marks = []
-        firedCues = []
         takeMotion = nil
         startZoom = camera.displayZoom
         if used.exposure == .lockAtStart {
@@ -1375,6 +1574,15 @@ struct ShotCameraView: View {
             saveTake(result, plan: used, startedAt: now, latitude: coordinate?.latitude, longitude: coordinate?.longitude,
                      plannedLength: planned)
         }
+        // The signals while it records, for when you can't see the screen (1.24).
+        if shot == .oneTake {
+            oneTakeSetup.save()
+            let parts = oneTakeSetup.parts
+            director.startOneTake(parts: parts, lengths: parts.map { oneTakeSetup.length(of: $0) },
+                                  move: oneTakeSetup.matchMove, hold: level.hold)
+        } else if used.signalsDuringTake {
+            director.startTimeline(used.timeline(endingAt: timing.stopsByItself ? timing.length : nil))
+        }
     }
 
     private func markMoment() {
@@ -1396,16 +1604,21 @@ struct ShotCameraView: View {
             zoomStarted = true
             camera.rampZoom(fromDisplay: ramp.from, toDisplay: ramp.to, duration: ramp.duration)
         }
-        // CLONE: the flash blinks when it's time to move to the next spot.
-        for (index, cue) in plan.flashCues.enumerated() where value >= cue && !firedCues.contains(index) {
-            firedCues.insert(index)
-            camera.blinkTorch()
+        // The flashes into each step, and ONE TAKE's parts (1.24).
+        director.tick(value)
+        if shot == .oneTake, director.run?.walkBackAt != nil, takeMotion == nil {
+            // The take check stops as you set off back: picking the phone up to stop it isn't the tripod shaking.
+            takeMotion = level.endTake()
         }
-        if timing.stopsByItself, value >= stopTime {
+        if timing.stopsByItself, shot != .oneTake, value >= stopTime {
             camera.stopRecording()
+            if plan.facesAwayOnTripod {
+                director.walkBack()
+            }
         }
         if shot == .dance && song.finished && value > 1 {
             camera.stopRecording()
+            director.walkBack()
         }
     }
 
@@ -1426,6 +1639,8 @@ struct ShotCameraView: View {
         takeSettings = nil
         let motion = takeMotion ?? level.endTake()
         takeMotion = nil
+        // ONE TAKE: the parts as you filmed them, where you moved on (1.24).
+        let oneTakeRun = shot == .oneTake ? director.finishOneTake() : nil
         guard let result else {
             if let problem = camera.startProblem {
                 message = "That take didn't start. The camera said \u{201C}\(problem)\u{201D}. Try again."
@@ -1456,11 +1671,21 @@ struct ShotCameraView: View {
             if shot == .wildlife {
                 tags.append("wildlife")
             }
+            // ONE TAKE: each part as a take of its shot, for the role it fills where you are. Worked out before the
+            // clip joins its scene, while the place is still the one you were filming (1.24).
+            var parts: [ClipPart]? = nil
+            if let oneTakeRun, let trip = store.trip(id: tripID) {
+                let reached = Array(oneTakeRun.parts.prefix(oneTakeRun.starts.count))
+                let fills = trip.oneTakePlan(reached, day: day, at: placeNow(in: trip))
+                parts = oneTakeRun.clipParts(duration: duration, fills: fills) { partShot in
+                    store.nextTake(tripID: tripID, shotName: partShot.rawValue, day: day)
+                }
+            }
             // The scene: the app's suggestion from where and when, or your choice for this clip if you made one.
             let scene = store.sceneForNewClip(tripID: tripID, day: day, latitude: latitude, longitude: longitude, at: startedAt)
             // Its name: a new place's is the one you gave it; otherwise your last clip's here, or the place's (1.21).
             let placeName = scene.isNew ? scene.placeName : (prefill ?? scene.placeName)
-            let clip = Clip(
+            var clip = Clip(
                 fileName: result.url.lastPathComponent,
                 shot: shot.rawValue,
                 take: used.take,
@@ -1498,6 +1723,7 @@ struct ShotCameraView: View {
                 scene: scene.scene,
                 sceneConfirmed: scene.confirmed ? true : nil,
                 plannedLength: plannedLength)
+            clip.parts = parts
             store.addClip(clip, to: tripID)
             lastClipID = clip.id
             if placeName != nil {
@@ -1508,11 +1734,6 @@ struct ShotCameraView: View {
                 reviewNote = nil
             } else {
                 reviewNote = !scene.isNew && prefill != nil ? "Same as your last clip here" : "Named after this place"
-            }
-            if shot == .matchCut, let saved = store.trip(id: tripID)?.clips.first(where: { $0.id == clip.id }),
-               let trip = store.trip(id: tripID) {
-                ghostZoom = zoomAtStart
-                ghost = await Self.still(of: store.clipURL(saved, in: trip), at: 3)
             }
             reviewClip = store.trip(id: tripID)?.clips.first(where: { $0.id == clip.id }) ?? clip
         }
@@ -1614,6 +1835,16 @@ struct ShotCameraView: View {
             message = "\(reason), so it doesn't count yet. Film it again, or open it later and choose Use anyway."
             return
         }
+        if shot == .oneTake {
+            // What the parts counted as (1.24).
+            if let filmed {
+                let names = (filmed.parts ?? []).map { $0.takeTitle }
+                message = names.isEmpty
+                    ? "That take stopped before its first part, so it doesn't count for anything."
+                    : "Saved as " + Self.listed(names) + ". From a new spot, another ONE TAKE fills the second roles."
+            }
+            return
+        }
         if shot.roles.isEmpty {
             if let place, filmed != nil {
                 // A shot tracked at each place, on a day at more than one: this place has its own now.
@@ -1634,6 +1865,12 @@ struct ShotCameraView: View {
             let whereCovered = place.map { "at \($0.name ?? "this place")" } ?? "for today"
             message = "\(shot.title) is covered \(whereCovered). \(more), or tap ✕ to pick the next shot."
         }
+    }
+
+    /// "A, B and C".
+    static func listed(_ items: [String]) -> String {
+        guard items.count > 1, let last = items.last else { return items.first ?? "" }
+        return items.dropLast().joined(separator: ", ") + " and " + last
     }
 
     private static func duration(of url: URL) async -> Double? {

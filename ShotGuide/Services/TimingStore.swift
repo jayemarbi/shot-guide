@@ -5,9 +5,13 @@ import Foundation
 /// Since 1.19 each creative role keeps its own too, like WIDE's Establishing and Me in the view.
 /// A shot you've never changed uses its plan's defaults.
 enum TimingStore {
+    /// Shots that became something else, so a length set for the old one doesn't carry over: CLONE is a long take since
+    /// 1.24, not 25 seconds.
+    private static let renewed: [ShotType: String] = [.clone: ".1.24"]
+
     /// The key used before roles: per shot, mode and version.
     private static func shotKey(_ shot: ShotType, plan: ShotPlan) -> String {
-        let base = "timing.\(shot.rawValue).\(plan.isInShot ? "inShot" : "inHand")"
+        let base = "timing.\(shot.rawValue).\(plan.isInShot ? "inShot" : "inHand")" + (renewed[shot] ?? "")
         guard !shot.variants.isEmpty, let version = plan.variantName else { return base }
         return base + "." + version
     }

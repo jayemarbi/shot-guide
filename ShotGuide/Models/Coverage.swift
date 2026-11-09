@@ -402,7 +402,8 @@ extension Trip {
     func coverage(for slot: ShotSlot, day number: Int) -> SlotCoverage {
         let type = day(number).type
         let target = slot.target(for: type)
-        var takes = clips.filter { $0.shot == slot.shot.rawValue && $0.dayNumber == number }
+        // A ONE TAKE counts as its parts, each a take of its own shot (1.24).
+        var takes = allTakes.filter { $0.shot == slot.shot.rawValue && $0.dayNumber == number }
         if let name = slot.variantName {
             takes = takes.filter { $0.variant == name }
         }
@@ -521,17 +522,39 @@ extension Trip {
         return result
     }
 
-    /// The next useful thing to film on a day: the first row of the lowest unfinished level, in the order of the
-    /// day, with the role it still needs.
-    func nextSuggestion(day number: Int) -> ShotSuggestion? {
+    /// What's worth filming next on a day, best first: the rows the lowest unfinished level still needs, in the order
+    /// of the day, each with the role it still needs, then the next level's. ONE TAKE comes just before the first of its
+    /// shots when two or more of them are still needed at that level, as one set-up films them all (1.24).
+    func nextSuggestions(day number: Int) -> [ShotSuggestion] {
+        var result: [ShotSuggestion] = []
+        var seen: Set<String> = []
+        func add(_ suggestion: ShotSuggestion) {
+            guard !seen.contains(suggestion.skipKey) else { return }
+            seen.insert(suggestion.skipKey)
+            result.append(suggestion)
+        }
         for level in CoverageLevel.allCases {
-            if let first = missing(level, day: number).first {
-                let coverage = self.coverage(for: first.slot, day: number)
-                let role = first.slot.shot.nextRole(after: nil, open: coverage.openRoleIDs)
-                return ShotSuggestion(shot: first.slot.shot, half: first.slot.half, role: role?.id)
+            let rows = missing(level, day: number)
+            let oneTakeRows = rows.filter { OneTakePart.shots.contains($0.slot.shot) }
+            for row in rows {
+                if oneTakeRows.count >= 2, row.id == oneTakeRows.first?.id {
+                    add(ShotSuggestion(shot: .oneTake))
+                }
+                let coverage = self.coverage(for: row.slot, day: number)
+                let role = row.slot.shot.nextRole(after: nil, open: coverage.openRoleIDs)
+                add(ShotSuggestion(shot: row.slot.shot, half: row.slot.half, role: role?.id))
             }
         }
-        return nil
+        return result
+    }
+
+    /// The next useful thing to film on a day, leaving out the shots you've skipped on the Next row since your last
+    /// take (1.24): skip one and the one after comes forward, and the skipped one is back after your next take. Once
+    /// everything's been skipped, it starts again from the top.
+    func nextSuggestion(day number: Int) -> ShotSuggestion? {
+        let all = nextSuggestions(day: number)
+        let skipped = Set(skippedNext?.day == number ? skippedNext?.keys ?? [] : [])
+        return all.first { !skipped.contains($0.skipKey) } ?? all.first
     }
 }
 
@@ -599,6 +622,11 @@ struct ShotSuggestion: Hashable {
         ShotSlot(shot: shot, half: half, role: role)
     }
 
+    /// Skip leaves out the whole shot (or WHIP's or HOME's half), whatever role it was on (1.24).
+    var skipKey: String {
+        shot.rawValue + (half.map { "-\($0)" } ?? "")
+    }
+
     var title: String {
         if let half, half < shot.variants.count {
             return "\(shot.title) · \(shot.variants[half])"
@@ -628,7 +656,7 @@ extension Clip {
             return .experience
         case .ambient, .bRoll, .timelapse, .reflection, .wildlife:
             return .atmosphere
-        case .whip, .home, .voiceover:
+        case .whip, .home, .voiceover, .oneTake:
             return nil
         }
     }
@@ -666,9 +694,9 @@ struct ClipScene: Identifiable {
         !clips.isEmpty && clips.allSatisfy { $0.sceneConfirmed == true }
     }
 
-    /// What the scene has, from takes that count.
+    /// What the scene has, from takes that count. A ONE TAKE brings each of its parts (1.24).
     var ingredients: Set<SceneIngredient> {
-        Set(clips.filter { $0.countsAsCoverage }.compactMap { $0.sceneIngredient })
+        Set(clips.flatMap { $0.takes }.filter { $0.countsAsCoverage }.compactMap { $0.sceneIngredient })
     }
 }
 

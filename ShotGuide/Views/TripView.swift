@@ -32,9 +32,27 @@ struct TripView: View {
     @State private var placeDraft = ""
     /// The last copy to a drive, so its clips can come off the phone.
     @State private var lastCopy: TripStore.CopySummary? = nil
+    /// Heat and battery, shown here rather than in the camera, so nothing distracts you while you film (1.24).
+    @State private var thermal = ProcessInfo.processInfo.thermalState
+    @State private var battery: Float = -1
+    @State private var charging = false
 
     var body: some View {
-        alerts(placeAlerts(sheets(page)))
+        alerts(placeAlerts(sheets(phoneEvents(page))))
+    }
+
+    /// Keeps the heat and battery warning up to date (1.24).
+    private func phoneEvents<Page: View>(_ view: Page) -> some View {
+        view
+            .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+                DispatchQueue.main.async { thermal = ProcessInfo.processInfo.thermalState }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
+                readBattery()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryStateDidChangeNotification)) { _ in
+                readBattery()
+            }
     }
 
     // The page is built from small pieces so the compiler can type-check each one quickly.
@@ -73,6 +91,9 @@ struct TripView: View {
             // Where you are, for the light and for noticing a new scene before you film it.
             location.start()
             scheduleLightAlerts()
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            readBattery()
+            thermal = ProcessInfo.processInfo.thermalState
         }
         .navigationTitle(trip.place)
         .toolbar {
@@ -180,6 +201,12 @@ struct TripView: View {
                 if store.spaceLeftText != nil {
                     spaceLine()
                 }
+                if let warning = phoneWarning {
+                    Label(warning.text, systemImage: warning.symbol)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(warning.critical ? Color.red : Color.orange)
+                        .padding(.top, 2)
+                }
             }
             .font(.subheadline)
             nextRow(trip, day: number)
@@ -204,6 +231,36 @@ struct TripView: View {
         }
     }
 
+    /// Heat, then battery, when either could cut a take short. nil the rest of the time.
+    private var phoneWarning: (text: String, symbol: String, critical: Bool)? {
+        switch thermal {
+        case .critical:
+            return ("The phone is too hot to film well. Let it cool in the shade for a few minutes.",
+                    "thermometer.sun.fill", true)
+        case .serious:
+            return ("The phone is getting hot, and recording may stop. Shade it between takes.", "thermometer.sun.fill", false)
+        default:
+            break
+        }
+        guard battery >= 0, !charging else { return nil }
+        let percent = Int((battery * 100).rounded())
+        if battery < 0.1 {
+            return ("Battery at \(percent)%. The cold drains it faster, so keep the phone in a warm pocket between shots.",
+                    "battery.25", true)
+        }
+        if battery < 0.25 {
+            return ("Battery at \(percent)%. Plug in a power bank before a TIMELAPSE, HYPERLAPSE or ONE TAKE.",
+                    "battery.25", false)
+        }
+        return nil
+    }
+
+    private func readBattery() {
+        let device = UIDevice.current
+        battery = device.batteryLevel
+        charging = device.batteryState == .charging || device.batteryState == .full
+    }
+
     // MARK: Coverage
 
     /// "Light day 10/10 ✓ · Everyday 14/22 · Full day 18/30", from the same takes.
@@ -226,39 +283,75 @@ struct TripView: View {
     }
 
     /// The next useful thing to film, one tap away: establish a new place when you've moved on, otherwise the first
-    /// row the lowest unfinished level still needs, in the order of the day.
+    /// row the lowest unfinished level still needs, in the order of the day. Skip brings the next one forward, and
+    /// the skipped one is back after your next take (1.24).
     @ViewBuilder
     private func nextRow(_ trip: Trip, day number: Int) -> some View {
+        let skipped = trip.skippedNext?.day == number ? (trip.skippedNext?.keys ?? []) : []
+        let establish = sceneSuggestion(.establish, trip: trip, day: number)
         let newPlace = !trip.clips(onDay: number).isEmpty && nextClipStartsScene(trip, day: number)
-        let next: ShotSuggestion? = newPlace
-            ? Optional(sceneSuggestion(.establish, trip: trip, day: number))
-            : trip.nextSuggestion(day: number)
+            && !skipped.contains(establish.skipKey)
+        let next: ShotSuggestion? = newPlace ? Optional(establish) : trip.nextSuggestion(day: number)
         if let next {
-            Button {
-                activeSlot = next.slot
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "arrow.right.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(Color.orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Next: " + next.title)
-                            .font(.headline)
-                        Text(newPlace ? "A new place: establish it first." : nextHint(next))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    Button {
+                        activeSlot = next.slot
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.right.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(Color.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Next: " + next.title)
+                                    .font(.headline)
+                                Text(newPlace ? "A new place: establish it first." : nextHint(next))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
                     }
-                    Spacer()
+                    .buttonStyle(.plain)
+                    Button {
+                        store.skipNext(next.skipKey, day: number, tripID: tripID)
+                    } label: {
+                        Text("Skip")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.orange.opacity(0.15), in: Capsule())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityHint("Brings the next shot forward. This one comes back after your next take.")
                 }
-                .contentShape(Rectangle())
+                if !skipped.isEmpty {
+                    Text("Skipped: " + skippedTitles(skipped) + ". Back after your next take.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 40)
+                }
             }
-            .buttonStyle(.plain)
         } else {
             Label("A full day's coverage. Film whatever's worth it.", systemImage: "checkmark.seal.fill")
                 .font(.subheadline)
                 .foregroundStyle(Color.green)
         }
+    }
+
+    /// "WIDE and ONE TAKE", from the skip keys: a shot, or WHIP's or HOME's half.
+    private func skippedTitles(_ keys: [String]) -> String {
+        let titles = keys.map { key -> String in
+            let pieces = key.split(separator: "-")
+            guard let shot = pieces.first.flatMap({ ShotType(rawValue: String($0)) }) else { return key }
+            if pieces.count > 1, let half = Int(pieces[1]), half < shot.variants.count {
+                return "\(shot.title) · \(shot.variants[half])"
+            }
+            return shot.title
+        }
+        return ShotCameraView.listed(titles)
     }
 
     private func nextHint(_ next: ShotSuggestion) -> String {
@@ -765,7 +858,8 @@ struct TripView: View {
         let type = trip.day(day).type
         let coverage = trip.coverage(for: slot, day: day)
         let summary = slot.summary(for: type)
-        let tierLabel = slot.tier(for: type).label
+        // ONE TAKE counts through its parts, so it isn't labelled an extra (1.24).
+        let tierLabel = shot == .oneTake ? nil : slot.tier(for: type).label
         return VStack(alignment: .leading, spacing: 8) {
             Button {
                 activeSlot = slot
@@ -786,16 +880,47 @@ struct TripView: View {
                         }
                     }
                     Spacer()
-                    progressBadge(coverage)
+                    if shot == .oneTake {
+                        // How many you've filmed today: what they count for shows in the chips and the other rows.
+                        let filmed = trip.clips(onDay: day).filter { $0.isOneTake }.count
+                        if filmed > 0 {
+                            Text("\(filmed) filmed")
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(Color.secondary)
+                        }
+                    } else {
+                        progressBadge(coverage)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if !coverage.roles.isEmpty || shot.perPlace {
+            if shot == .oneTake {
+                oneTakeChips(trip, day: day)
+            } else if !coverage.roles.isEmpty || shot.perPlace {
                 placeChips(slot, trip: trip, day: day, dayCoverage: coverage)
             }
         }
         .foregroundStyle(Color.primary)
+    }
+
+    /// ONE TAKE's parts, as what each would count as where you are now: still to film, or an extra (1.24). Tap one to
+    /// film it.
+    private func oneTakeChips(_ trip: Trip, day: Int) -> some View {
+        let setup = OneTakeSetup.load()
+        let fills = trip.oneTakePlan(setup.parts, day: day, at: placeNow(trip, day: day))
+        return FlowLayout(spacing: 6) {
+            ForEach(fills, id: \.part) { fill in
+                Button {
+                    activeSlot = ShotSlot(shot: .oneTake, half: nil)
+                } label: {
+                    CoverageChip(text: fill.part == .matchCut ? "MATCH CUT · \(setup.matchMove.title)" : fill.title,
+                                 look: fill.adds ? .toFilm : .spare)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(.leading, 40)
     }
 
     /// The chips under a shot. Once the day has been at more than one place, the shots tracked at each place show

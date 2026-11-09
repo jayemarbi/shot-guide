@@ -46,10 +46,12 @@ struct ReviewView: View {
         case failed(String)
     }
 
-    /// Shot types a clip added from Photos can be given, in the trip page's order. WHIP needs halves, so it's left out.
+    /// Shot types a clip added from Photos can be given, in the trip page's order. WHIP needs halves, so it's left out,
+    /// and so is ONE TAKE, whose parts are marked as it's filmed.
     static let importChoices: [ShotType] = {
         var choices: [ShotType] = []
-        for slot in TripPhase.allSlots where !slot.shot.isTransition && slot.shot != .voiceover && !choices.contains(slot.shot) {
+        for slot in TripPhase.allSlots where !slot.shot.isTransition && slot.shot != .voiceover && slot.shot != .oneTake
+            && !choices.contains(slot.shot) {
             choices.append(slot.shot)
         }
         return choices
@@ -67,6 +69,9 @@ struct ReviewView: View {
                     gradedCopySection
                     checkSection
                     coverageSection
+                    if let clip, clip.isOneTake {
+                        partsSection(clip)
+                    }
                     nameSection
                     if clip?.isAdded == true {
                         shotPicker
@@ -281,8 +286,72 @@ struct ReviewView: View {
         }
     }
 
+    /// ONE TAKE's parts (1.24): what each counts as, where it is in the take, and your verdict on each. A part you
+    /// didn't do can be marked not usable, so its role stays open.
+    private func partsSection(_ clip: Clip) -> some View {
+        let parts = clip.parts ?? []
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Parts")
+                .font(.headline)
+            if parts.isEmpty {
+                Text("The take stopped before its first part, so it doesn't count for anything.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(parts) { part in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(part.takeTitle)
+                                .font(.subheadline.weight(.semibold))
+                            Text("\(part.title) · \(clockString(part.start)) to \(clockString(part.end)) · take \(part.take)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if player != nil {
+                            Button {
+                                player?.seek(to: CMTime(seconds: part.start, preferredTimescale: 600))
+                                player?.play()
+                            } label: {
+                                Label("Play", systemImage: "play.fill")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    Picker("Usable?", selection: partVerdict(part)) {
+                        Text("As the take").tag(Bool?.none)
+                        Text("Usable").tag(Bool?.some(true))
+                        Text("Not usable").tag(Bool?.some(false))
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(12)
+                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            }
+            if !parts.isEmpty {
+                Text("Each part counts as a take of its shot. As the take follows what you chose above. Mark a part "
+                    + "not usable if you skipped it, and its role stays open.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// One part's verdict, saved as soon as you choose.
+    private func partVerdict(_ part: ClipPart) -> Binding<Bool?> {
+        Binding(
+            get: { clip?.parts?.first(where: { $0.id == part.id })?.usable },
+            set: { store.setPartVerdict($0, partID: part.id, clipID: clipID, tripID: tripID) })
+    }
+
     /// What the take does for coverage, with the choices as they are on screen.
     private func coverageNote(_ clip: Clip) -> String {
+        if clip.isOneTake {
+            return usableChoice == false ? "Marked not usable: none of its parts count, unless you mark one below."
+                : "Each part counts as a take of its own shot, below."
+        }
         var preview = clip
         preview.usable = usableChoice
         preview.favourite = favourite

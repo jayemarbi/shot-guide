@@ -140,8 +140,6 @@ struct ShotTiming: Codable, Equatable {
 
 /// A guide drawn over the camera picture for some creative shots.
 enum ShotOverlay {
-    /// A see-through still of your last MATCH CUT, to line the next one up.
-    case ghost
     /// A crosshair to keep your target in the middle, for HYPERLAPSE.
     case crosshair
 }
@@ -149,7 +147,7 @@ enum ShotOverlay {
 /// How the camera handles brightness for a shot.
 enum ExposureStyle {
     case auto
-    /// Focus and exposure lock when recording starts, so nothing shifts while you move around (CLONE).
+    /// Focus and exposure lock when recording starts, so nothing shifts while you move around (CLONE, ONE TAKE).
     case lockAtStart
     /// Darker, so you stay black against the sky (SILHOUETTE).
     case silhouette
@@ -183,8 +181,6 @@ struct ShotPlan {
     var steps: [GuideStep] = []
     var variantName: String? = nil
     var overlay: ShotOverlay? = nil
-    /// Seconds into the take when the flash blinks, to tell you to move.
-    var flashCues: [Double] = []
     var exposure: ExposureStyle = .auto
     /// Added to the camera's exposure: brighter for snow, darker for silhouettes.
     var exposureBias: Float = 0
@@ -199,9 +195,25 @@ struct ShotPlan {
 
     var isInShot: Bool { group == .inShot }
 
+    /// You're in it with the phone on the tripod, its back camera facing you: you can't see the screen (1.24).
+    var facesAwayOnTripod: Bool {
+        isInShot && mount == .tripod && lens != .front && timelapseInterval == nil
+    }
+
+    /// The flash (and, with headphones in, a voice) leads into each step while it records: the shots you're in on the
+    /// tripod. Not DANCE, which the song leads, or HOME, often filmed in the dark (1.24).
+    var signalsDuringTake: Bool {
+        facesAwayOnTripod && shot != .dance && shot != .home
+    }
+
+    /// The screen dims from when you press record until the take ends, as nobody's looking at it (1.24).
+    var dimsScreen: Bool {
+        facesAwayOnTripod
+    }
+
     var captureConfig: CaptureConfig {
         CaptureConfig(lens: lens, fps: fps, stabilisation: stabilisation, timelapseInterval: timelapseInterval,
-                      exposureBias: exposureBias, playsMusic: shot == .dance)
+                      exposureBias: exposureBias, playsMusic: shot == .dance, speaksPrompts: signalsDuringTake)
     }
 
     /// Phone-in-hand shots start straight away; shots you're in count you in.
@@ -214,23 +226,15 @@ struct ShotPlan {
     static let shortStep: Double = 3
 
     /// The timeline fitted to how the take ends. With no end (you stop it yourself) the last step stays open.
-    /// At the length the steps were written for, they're as written. For a shot you're holding, at any other length
-    /// the short steps (3 seconds or less) keep their length and the longer ones, the main action, share the rest in
-    /// proportion, so a longer take means more of the action rather than a longer stop (1.23). When every step is
-    /// short, or the take is shorter than the short steps together, they all change in proportion. Times are whole
-    /// seconds, and the last step ends exactly at the end. Shots you're in keep their steps where they were written,
-    /// the last one running to the end, since their cues (like CLONE's flashes) are set in seconds.
+    /// At the length the steps were written for, they're as written. At any other length the short steps (3 seconds
+    /// or less) keep their length and the longer ones, the main action, share the rest in proportion, so a longer take
+    /// means more of the action rather than a longer stop (1.23). When every step is short, or the take is shorter than
+    /// the short steps together, they all change in proportion. Times are whole seconds, and the last step ends exactly
+    /// at the end. Since 1.24 this goes for the shots you're in too: the flashes follow the steps, wherever they fall.
     func timeline(endingAt end: Double?) -> [GuideStep] {
         guard let end else {
             guard let last = steps.last else { return steps }
             return Array(steps.dropLast()) + [GuideStep(start: last.start, end: nil, text: last.text)]
-        }
-        guard !isInShot, flashCues.isEmpty else {
-            var kept = steps.filter { $0.start < end }
-            if let last = kept.last {
-                kept[kept.count - 1] = GuideStep(start: last.start, end: end, text: last.text)
-            }
-            return kept
         }
         guard let first = steps.first, end > first.start else { return steps }
         // Each step's length as written: to its end, the next step's start, or the end of the take.
@@ -308,6 +312,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     case dance = "DANCE"
     /// Walking into where you're staying, for stay tours.
     case stay = "STAY"
+    /// Several shots you're in, from one tripod set-up, in one long take (1.24). Its parts count as takes of their shots.
+    case oneTake = "ONETAKE"
 
     var id: String { rawValue }
 
@@ -316,6 +322,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .onTheWay: return "ON THE WAY"
         case .matchCut: return "MATCH CUT"
         case .bRoll: return "B-ROLL"
+        case .oneTake: return "ONE TAKE"
         default: return rawValue
         }
     }
@@ -350,7 +357,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     var filming: Filming {
         switch self {
         case .wide, .tele, .walkaway, .moment, .silhouette, .timelapse, .reflection, .matchCut, .onTheWay, .wildlife, .home,
-             .bRoll:
+             .bRoll, .oneTake:
             return .landscape
         case .talk, .reaction, .pov, .food, .follow, .whip:
             return .portrait
@@ -362,7 +369,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     var defaultGroup: ShotGroup {
         switch self {
         case .reaction, .timelapse, .walkaway, .tele, .moment, .talk, .home: return .inShot
-        case .matchCut, .clone, .silhouette, .dance: return .inShot
+        case .matchCut, .clone, .silhouette, .dance, .oneTake: return .inShot
         default: return .inHand
         }
     }
@@ -374,6 +381,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .reveal: return ["Auto zoom", "Walk reveal", "Tilt up"]
         case .talk: return ["Tripod", "Walking"]
+        case .reaction: return ["1x", "0.5x"]
+        case .matchCut: return MatchMove.allCases.map { $0.title }
         case .whip: return ["Out", "In"]
         case .home: return ["Before", "After"]
         default: return []
@@ -383,7 +392,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// Still shots get checked for shake and tilt, close-ups for shake only, and moving shots not at all.
     func takeCheck(variantName: String?) -> TakeCheckKind {
         switch self {
-        case .wide, .tele, .slomo, .ambient, .timelapse, .moment, .walkaway, .matchCut, .clone, .silhouette, .dance:
+        case .wide, .tele, .slomo, .ambient, .timelapse, .moment, .walkaway, .matchCut, .clone, .silhouette, .dance, .oneTake:
             return .steadyAndLevel
         case .talk:
             return variantName == "Walking" ? .none : .steadyAndLevel
@@ -421,8 +430,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .slomo: return "Water, waves or a jump in slow motion"
         case .whip: return "Whip pan from one place to the next"
         case .voiceover: return "Your voice, for narration and captions"
-        case .matchCut: return "The same pose at every spot, cut together"
-        case .clone: return "Three of you in one frame"
+        case .matchCut: return "One move, done once at every place, cut together"
+        case .clone: return "One long take of you all over the frame, for clones"
         case .orbit: return "A slow circle around your partner"
         case .hyperlapse: return "A slow walk, sped up into a glide"
         case .dance: return "Dance or lip-sync to your song, with the view behind you"
@@ -433,6 +442,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .home: return "Before you go and after you're back"
         case .bRoll: return "Six different kinds of footage that show the place"
         case .stay: return "Walking into where you're staying"
+        case .oneTake: return "WIDE, WALKAWAY, MOMENT, MATCH CUT and CLONE in one long take"
         }
     }
 
@@ -472,7 +482,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return plan.variantName == "Walking" ? .gimbal : .tripod
         case .wide, .slomo:
             return plan.isInShot ? .tripod : .handheld
-        case .timelapse, .walkaway, .tele, .moment, .matchCut, .clone, .silhouette, .dance, .home:
+        case .timelapse, .walkaway, .tele, .moment, .matchCut, .clone, .silhouette, .dance, .home, .oneTake:
             return .tripod
         case .follow, .pov, .orbit, .hyperlapse, .stay:
             return .gimbal
@@ -505,7 +515,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         let firstHalf = plan.variantName == variants.first
         switch self {
         case .reaction:
-            return "Arm's length, your face in the top half of the frame. As you turn, the view comes in behind you."
+            return "Arm's length, the phone facing you, your face in the top half of the frame and the view coming in behind "
+                + "you. Then the phone turns round to the view."
         case .wide:
             guard plan.isInShot else { return nil }
             if plan.role?.id == "vertical-hero" {
@@ -530,9 +541,26 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .slomo:
             return plan.isInShot ? "In the middle of the frame where the action is: mid-jump, at the water's edge or under the spray." : nil
         case .matchCut:
-            return "Exactly where your see-through outline was last time: the same spot, the same size, the same pose."
+            switch MatchMove.named(plan.variantName) ?? .runAcross {
+            case .runAcross:
+                return "Side-on, on the line you'll run along, in the middle of the frame while it finds your size. Then out "
+                    + "of shot to the left, and across."
+            case .leap:
+                return "In the middle of the frame, with room above your head for the jump."
+            case .armsOut:
+                return "In the middle of the frame. Face the phone while it finds your size, then turn to the view."
+            case .spin, .fallBack:
+                return "In the middle of the frame, facing the phone."
+            case .snap:
+                return "Head and shoulders in the middle of the upright frame, looking at the lens."
+            case .ridgeWalk:
+                return "Tiny and side-on, on a ridge, a dune or the shoreline 30 to 50 m away, against the sky."
+            }
         case .clone:
-            return "Three spots across the frame that don't overlap, all about the same distance from the phone."
+            return "Anywhere in the frame, a different spot each time, all about the same distance from the phone. Never "
+                + "where you've just been, so you don't overlap yourself."
+        case .oneTake:
+            return "You start behind the phone, out of shot. The parts take you out into the view and back again."
         case .silhouette:
             return "Low in the frame against the brightest part of the sky, side-on, a little apart so there's sky between you."
         case .dance:
@@ -554,7 +582,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     "Film from the shady side, and wipe the window first."]
         case .reaction:
             return ["Say what you'd really say. A real reaction beats a big one.",
-                    "Turn so the view ends up behind you, not beside you."]
+                    "Turn the phone round slowly, so the view comes in smoothly.",
+                    "1x keeps your face and the view behind you; 0.5x gets more of the place in."]
         case .reveal:
             return ["The closer the thing blocking the view, the bigger the reveal.",
                     "Golden hour reveals look best with the sun off to one side.",
@@ -601,11 +630,13 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ["Whip the same way in both halves, so the cut lines up.",
                     "Commit to it. A half-hearted whip doesn't hide the cut."]
         case .matchCut:
-            return ["Pick one pose, like arms out or a jump, and repeat it at every stop.",
+            return ["Keep one move for the whole trip, and across trips: it becomes your signature.",
+                    "Your first take of a move sets your size. Tap New size if you want to start again.",
                     "Wear the same jacket each time so it reads as one journey."]
         case .clone:
             return ["Overcast light or shade works best, as shadows don't cut out.",
-                    "Do something different at each spot."]
+                    "Do something different at each spot.",
+                    "The empty frame at the start and end is what the edit puts the clones on, so stay out of it."]
         case .orbit:
             return ["Keep them the same size all the way round.",
                     "Slower looks smoother."]
@@ -634,6 +665,11 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ["Things that move are best: people walking, flags, water, traffic, clouds.",
                     "Signs with the place's name are great for titles.",
                     "On the 5x, peaks and skies at different times of day can cut together behind one walk."]
+        case .oneTake:
+            return ["Your remote moves you on to the next part whenever you're ready.",
+                    "Leave MATCH CUT or CLONE out when the spot doesn't suit them, and film them on their own further along.",
+                    "A second ONE TAKE from a new spot fills the second roles: WIDE · Another angle, WALKAWAY · New spot "
+                        + "or action and MOMENT · Together."]
         case .stay:
             return ["Film it the moment you arrive, before you unpack, with the curtains open and the lights on.",
                     "Walk in slowly and let your first reaction happen.",
@@ -651,17 +687,21 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
 
         switch self {
         case .reaction:
+            // The back camera, for the best picture, held facing you: you can't see the screen until you turn the
+            // phone round to the view (1.24). 60 fps, so the moment can be slowed down.
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
-                lens: .front, fps: 30, stabilisation: .standard,
-                autoStop: nil, manualLength: 30, countdown: 3,
-                before: "Front camera at arm's length. Start before you can see the view.",
+                lens: variantIndex == 1 ? .ultraWide : .wide, fps: 60, stabilisation: .cinematic,
+                autoStop: nil, manualLength: 40, countdown: 5,
+                before: "Back camera, held at arm's length facing you, screen away. Start before you can see the view. "
+                    + "Once you've reacted, turn the phone round to show what you're looking at, all in one take.",
                 steps: [
                     GuideStep(start: 0, end: 10, text: "Walk up. Don't look at the view yet."),
                     GuideStep(start: 10, end: 20, text: "First look. React how you really feel."),
-                    GuideStep(start: 20, end: 30, text: "Keep rolling. Look between the view and the lens."),
-                    GuideStep(start: 30, end: nil, text: "Stop when you're ready.")
-                ])
+                    GuideStep(start: 20, end: 30, text: "Turn the phone round slowly to the view."),
+                    GuideStep(start: 30, end: nil, text: "Hold on the view, then stop.")
+                ],
+                variantName: variantName)
 
         case .reveal:
             if variantIndex == 0 {
@@ -723,26 +763,26 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 return ShotPlan(
                     shot: self, take: take, group: .inShot,
                     lens: .ultraWide, fps: 30, stabilisation: .off,
-                    autoStop: 30, countdown: 10,
+                    autoStop: 45, countdown: 10,
                     before: "Tripod. Use the 10-second countdown to walk to your spot, small in the frame. On your own or "
                         + "together.",
                     steps: [
                         GuideStep(start: 0, end: 5, text: "Stand still and look out at the view."),
-                        GuideStep(start: 5, end: 25, text: "Do something natural: walk a few steps, look around, sit, point something out."),
-                        GuideStep(start: 25, end: 30, text: "Hold still.")
+                        GuideStep(start: 5, end: 40, text: "Do something natural: walk a few steps, look around, sit, point something out."),
+                        GuideStep(start: 40, end: 45, text: "Hold still.")
                     ])
             case "alternative":
                 if inShot {
                     return ShotPlan(
                         shot: self, take: take, group: .inShot,
                         lens: .wide, fps: 30, stabilisation: .off,
-                        autoStop: 25, countdown: 10,
+                        autoStop: 40, countdown: 10,
                         before: "Tripod somewhere new: higher, lower, further back or the other side, at 1x. Walk to your "
                             + "spot in the countdown.",
                         steps: [
                             GuideStep(start: 0, end: 5, text: "Get into your spot and look out."),
-                            GuideStep(start: 5, end: 20, text: "Let the scene play: move a little, look around."),
-                            GuideStep(start: 20, end: 25, text: "Hold still.")
+                            GuideStep(start: 5, end: 35, text: "Let the scene play: move a little, look around."),
+                            GuideStep(start: 35, end: 40, text: "Hold still.")
                         ])
                 }
                 return ShotPlan(
@@ -761,13 +801,13 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     return ShotPlan(
                         shot: self, take: take, group: .inShot,
                         lens: .ultraWide, fps: 30, stabilisation: .off,
-                        autoStop: 20, countdown: 10,
+                        autoStop: 30, countdown: 10,
                         before: "Phone upright on the tripod. Walk to your spot in the countdown, small in the lower half of "
                             + "the frame.",
                         steps: [
                             GuideStep(start: 0, end: 5, text: "Stand still, facing the view."),
-                            GuideStep(start: 5, end: 18, text: "Hold, or move slowly. Stay near the middle."),
-                            GuideStep(start: 18, end: 20, text: "Hold still.")
+                            GuideStep(start: 5, end: 27, text: "Hold, or move slowly. Stay near the middle."),
+                            GuideStep(start: 27, end: 30, text: "Hold still.")
                         ],
                         filming: .portrait)
                 }
@@ -803,38 +843,38 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 return ShotPlan(
                     shot: self, take: take, group: .inShot,
                     lens: .ultraWide, fps: 60, stabilisation: .off,
-                    autoStop: 20, countdown: 5,
+                    autoStop: 30, countdown: 5,
                     before: "Somewhere different from your first walk: a new path, a closer frame or another direction. "
                         + "Tripod at knee or hip height. This time, add an action: look back over your shoulder, take "
                         + "your partner's hand or stop right at the edge.",
                     steps: [
                         GuideStep(start: 0, end: 2, text: "Empty frame. You're just out of shot beside the phone."),
-                        GuideStep(start: 2, end: 10, text: "Walk in and keep going."),
-                        GuideStep(start: 10, end: 14, text: "Stop and look out at the view."),
-                        GuideStep(start: 14, end: 20, text: "Your action: look back over your shoulder, or reach for their hand.")
+                        GuideStep(start: 2, end: 16, text: "Walk in and keep going."),
+                        GuideStep(start: 16, end: 22, text: "Stop and look out at the view."),
+                        GuideStep(start: 22, end: 30, text: "Your action: look back over your shoulder, or reach for their hand.")
                     ])
             }
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .ultraWide, fps: 60, stabilisation: .off,
-                autoStop: 20, countdown: 5,
+                autoStop: 30, countdown: 5,
                 before: "Tripod at knee or hip height, with a path or ridge leading into the view.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Empty frame. You're just out of shot beside the phone."),
-                    GuideStep(start: 2, end: 12, text: "Walk in and keep going. Don't look back."),
-                    GuideStep(start: 12, end: 17, text: "Stop and look out at the view."),
-                    GuideStep(start: 17, end: 20, text: "Hold still.")
+                    GuideStep(start: 2, end: 18, text: "Walk in and keep going. Don't look back."),
+                    GuideStep(start: 18, end: 27, text: "Stop and look out at the view."),
+                    GuideStep(start: 27, end: 30, text: "Hold still.")
                 ])
 
         case .tele:
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .tele, fps: 30, stabilisation: .off,
-                autoStop: 25, countdown: 45,
+                autoStop: 40, countdown: 45,
                 before: "Tripod. Use the 45-second countdown to walk 30–50 m out.",
                 steps: [
                     GuideStep(start: 0, end: 10, text: "Stand still, facing the view."),
-                    GuideStep(start: 10, end: 25, text: "Walk slowly across the frame.")
+                    GuideStep(start: 10, end: 40, text: "Walk slowly across the frame.")
                 ])
 
         case .moment:
@@ -842,26 +882,26 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 return ShotPlan(
                     shot: self, take: take, group: .inShot,
                     lens: .wide, fps: 60, stabilisation: .off,
-                    autoStop: 40, countdown: 10,
+                    autoStop: 60, countdown: 10,
                     before: "Tripod, with the view behind you. Something real together: laughing, a kiss, walking hand in "
                         + "hand, a slow spin. On your own, a real reaction to the place. It films at 60 fps so the moment "
                         + "can be slowed down a little.",
                     steps: [
                         GuideStep(start: 0, end: 5, text: "Get comfortable. Don't look at the camera."),
-                        GuideStep(start: 5, end: 35, text: "Have the moment. Keep it real and keep moving gently."),
-                        GuideStep(start: 35, end: 40, text: "Hold still in the last moment.")
+                        GuideStep(start: 5, end: 55, text: "Have the moment. Keep it real and keep moving gently."),
+                        GuideStep(start: 55, end: 60, text: "Hold still in the last moment.")
                     ])
             }
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .wide, fps: 60, stabilisation: .off,
-                autoStop: 35, countdown: 10,
+                autoStop: 60, countdown: 10,
                 before: "Tripod, with the view behind you. Enjoy the place itself: touch the water, lie back in the grass, "
                     + "take in the view, explore. For a mountain that looms bigger, set up further back and use the zoom lens.",
                 steps: [
                     GuideStep(start: 0, end: 5, text: "Get comfortable. Don't look at the camera."),
-                    GuideStep(start: 5, end: 30, text: "Enjoy the place. Keep it real and keep moving gently."),
-                    GuideStep(start: 30, end: 35, text: "Hold still in the last moment.")
+                    GuideStep(start: 5, end: 55, text: "Enjoy the place. Keep it real and keep moving gently."),
+                    GuideStep(start: 55, end: 60, text: "Hold still in the last moment.")
                 ])
 
         case .follow:
@@ -1015,11 +1055,12 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     ],
                     variantName: variantName)
             }
+            // The front camera, like Walking, so you can see yourself (1.24).
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
-                lens: .wide, fps: 30, stabilisation: .off,
+                lens: .front, fps: 30, stabilisation: .off,
                 autoStop: nil, manualLength: 20, countdown: 5,
-                before: "Tripod at eye level, mic clipped on. Do three takes.",
+                before: "Front camera on the tripod at eye level, so you can see yourself, mic clipped on. Do three takes.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Look at the lens and smile."),
                     GuideStep(start: 2, end: 15, text: "Say one thing about this place."),
@@ -1234,42 +1275,51 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 ])
 
         default:
-            return creativePlan(take: take)
+            return creativePlan(take: take, variant: variantIndex, variantName: variantName)
         }
     }
 
     /// The creative shots.
-    private func creativePlan(take: Int) -> ShotPlan {
+    private func creativePlan(take: Int, variant: Int, variantName: String?) -> ShotPlan {
         switch self {
         case .matchCut:
-            return ShotPlan(
-                shot: self, take: take, group: .inShot,
-                lens: .wide, fps: 30, stabilisation: .off,
-                autoStop: 6, countdown: 10,
-                before: "Tripod at the same height as last time. Line the frame up with the see-through still of your last "
-                    + "MATCH CUT, then do the same pose: arms out, a spin, a jump or a look back.",
-                steps: [
-                    GuideStep(start: 0, end: 2, text: "Stand where your outline was."),
-                    GuideStep(start: 2, end: 5, text: "Do the pose once, cleanly, at the same speed as before."),
-                    GuideStep(start: 5, end: 6, text: "Hold.")
-                ],
-                overlay: .ghost)
+            return Self.matchCutPlan(take: take, move: MatchMove(rawValue: variant) ?? .runAcross)
 
         case .clone:
+            // One long take with everything locked: you all over the frame, and empty at the start and end, for the edit
+            // to make the clones (1.24).
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .wide, fps: 30, stabilisation: .off,
-                autoStop: 25, countdown: 10,
-                before: "Tripod only: the phone can't move at all. Focus and exposure lock when recording starts. "
-                    + "Pick three spots that don't overlap. Overcast light or shade works best, as shadows don't cut out.",
+                autoStop: 180, countdown: 10,
+                before: "Tripod only: the phone can't move at all. Focus, exposure and white balance lock when recording "
+                    + "starts. Start with the frame empty, then go about the scene doing different things in different "
+                    + "spots: 5 flashes mean it's time for a new one. Walk out at the end and leave it empty. The edit "
+                    + "makes the clones.",
                 steps: [
-                    GuideStep(start: 0, end: 4, text: "Spot 1: hold your pose."),
-                    GuideStep(start: 4, end: 10, text: "Flash: walk to spot 2 and hold."),
-                    GuideStep(start: 10, end: 16, text: "Flash: walk to spot 3 and hold."),
-                    GuideStep(start: 16, end: 19, text: "Flash: walk out of the frame."),
-                    GuideStep(start: 19, end: 25, text: "The empty scene. Stay out of shot.")
+                    GuideStep(start: 0, end: 10, text: "Empty frame. Stay out of shot beside the phone."),
+                    GuideStep(start: 10, end: 40, text: "Walk in to your first spot and do something: sit, look out, take a photo."),
+                    GuideStep(start: 40, end: 70, text: "New spot: something different."),
+                    GuideStep(start: 70, end: 100, text: "New spot: something different."),
+                    GuideStep(start: 100, end: 130, text: "New spot: something different."),
+                    GuideStep(start: 130, end: 160, text: "New spot: something different."),
+                    GuideStep(start: 160, end: 180, text: "Walk out of the frame and leave it empty.")
                 ],
-                flashCues: [4, 10, 16],
+                exposure: .lockAtStart)
+
+        case .oneTake:
+            // The parts you've chosen, each counting as a take of its shot. The camera screen builds the steps from
+            // your parts and lengths; these are the usual ones (1.24).
+            let setup = OneTakeSetup()
+            return ShotPlan(
+                shot: self, take: take, group: .inShot,
+                lens: .ultraWide, fps: 60, stabilisation: .off,
+                autoStop: nil, manualLength: setup.total, countdown: 10,
+                before: "Tripod at hip height, landscape, the view in front. Tap a part to leave it out, or change how long it "
+                    + "runs: each part counts as a take of its shot. Focus, exposure and white balance lock when it starts, "
+                    + "so every part matches. It keeps rolling after the last part to catch you walking back: stop it when "
+                    + "you get there.",
+                steps: setup.steps(),
                 exposure: .lockAtStart)
 
         case .orbit:
@@ -1351,6 +1401,93 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 0, end: 2, text: "Quiet."),
                     GuideStep(start: 2, end: 6, text: "Make the sound once."),
                     GuideStep(start: 6, end: 8, text: "Quiet again.")
+                ])
+        }
+    }
+}
+
+extension ShotType {
+    /// MATCH CUT, one plan per move (1.24). The tripod moves share ONE TAKE's set-up (0.5x, 60 fps), so a move filmed
+    /// in a ONE TAKE matches the same move filmed on its own. Before the countdown, the camera finds you and zooms to
+    /// the size you were in your first take of the move, so the 5 flashes come once you're framed.
+    static func matchCutPlan(take: Int, move: MatchMove) -> ShotPlan {
+        let lead = "Tripod at hip height. Press record and stand where you'll do it, facing the phone: while the light's "
+            + "on, it zooms to the size you were in your first take of this move. When the light goes off, 5 flashes, "
+            + "then it's rolling."
+        func make(lens: LensChoice = .ultraWide, fps: Int = 60, autoStop: Double, before: String,
+                  steps: [GuideStep], filming: Filming? = nil) -> ShotPlan {
+            ShotPlan(shot: .matchCut, take: take, group: .inShot,
+                     lens: lens, fps: fps, stabilisation: .off,
+                     autoStop: autoStop, countdown: 5,
+                     before: before, steps: steps, variantName: move.title, filming: filming)
+        }
+        switch move {
+        case .runAcross:
+            return make(
+                autoStop: 15,
+                before: lead + " Then walk out of shot to the left, and run across on the flashes.",
+                steps: [
+                    GuideStep(start: 0, end: 8, text: "Walk out of shot to the left."),
+                    GuideStep(start: 8, end: 13, text: "Run across the frame and out the right."),
+                    GuideStep(start: 13, end: 15, text: "Stay out of shot.")
+                ])
+        case .leap:
+            return make(
+                autoStop: 10,
+                before: lead,
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Stand in the middle, ready."),
+                    GuideStep(start: 5, end: 8, text: "Leap, once, as big as you can."),
+                    GuideStep(start: 8, end: 10, text: "Land and hold.")
+                ])
+        case .armsOut:
+            return make(
+                autoStop: 12,
+                before: lead + " Then turn to face the view.",
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Turn to the view, arms down."),
+                    GuideStep(start: 5, end: 10, text: "Raise your arms out wide, slowly."),
+                    GuideStep(start: 10, end: 12, text: "Hold.")
+                ])
+        case .spin:
+            return make(
+                autoStop: 10,
+                before: lead,
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Stand facing the phone."),
+                    GuideStep(start: 5, end: 8, text: "Spin round once."),
+                    GuideStep(start: 8, end: 10, text: "Hold.")
+                ])
+        case .fallBack:
+            return make(
+                autoStop: 10,
+                before: lead + " Somewhere soft behind you: grass, sand or snow.",
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Stand facing the phone, the soft ground behind you."),
+                    GuideStep(start: 5, end: 8, text: "Fall backwards."),
+                    GuideStep(start: 8, end: 10, text: "Lie still.")
+                ])
+        case .snap:
+            return make(
+                lens: .wide, autoStop: 8,
+                before: "Phone upright on the tripod at chest height, close in. Press record and look at the lens: while "
+                    + "the light's on, it zooms to the size you were in your first Snap. When it goes off, 5 flashes, then "
+                    + "it's rolling.",
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Look at the lens."),
+                    GuideStep(start: 5, end: 6, text: "Snap!"),
+                    GuideStep(start: 6, end: 8, text: "Hold.")
+                ],
+                filming: .portrait)
+        case .ridgeWalk:
+            return make(
+                lens: .tele, fps: 30, autoStop: 25,
+                before: "Tripod facing a ridge, a dune or a shoreline 30 to 50 m away. Press record and walk out with the light "
+                    + "on: when you stop, it zooms to the size you were in your first Ridge walk, and the light goes off. "
+                    + "Then 5 flashes, and walk.",
+                steps: [
+                    GuideStep(start: 0, end: 5, text: "Stand still, side-on."),
+                    GuideStep(start: 5, end: 25, text: "Walk slowly along the ridge, at an even pace.")
                 ])
         }
     }

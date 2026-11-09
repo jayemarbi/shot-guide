@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Checks how each shot's walkthrough fits a length you've changed (1.23), and the few words the prompt shows while
-you film. A model of ShotPlan.timeline(endingAt:) and GuideStep.headline, run over every step list in
-ShotType.swift at every length the timing control offers. (In the app, the stretching applies to shots you're
-holding; shots you're in keep their steps where they were written, as before.)
+"""Checks how each shot's walkthrough fits a length you've changed (1.23), the few words the prompt shows while
+you film, and the flashes that lead you through a shot you're in (1.24). A model of ShotPlan.timeline(endingAt:),
+GuideStep.headline and TakeDirector's lead-ins, run over every step list in ShotType.swift at every length the timing
+control offers. Since 1.24 the stretching applies to the shots you're in too, and the flashes follow the steps.
 
 Run: python3 tools/test_timeline.py [path to the repo]
 """
@@ -158,6 +158,88 @@ check("Headlines: 'Walk smoothly towards it', 'Hold the frame', 'Start moving sl
 check("The extra seconds' step reads 'Keep the phone steady for 2 more seconds'",
       headline("Keep the phone steady for 2 more seconds. It gives the edit room.")
       == "Keep the phone steady for 2 more seconds")
+
+# The flashes into each step while you're in the shot (TakeDirector.startTimeline, 1.24): 5 flashes, one a second,
+# leading into every step whose step before is 5 seconds or more.
+def lead_ins(steps):
+    cues = []
+    for i in range(1, len(steps)):
+        if steps[i][0] - steps[i - 1][0] >= 5:
+            cues.append([steps[i][0] - k for k in (5, 4, 3, 2, 1)])
+    return cues
+
+
+bad = []
+for line, stop, steps in plans:
+    for length in LENGTHS:
+        got = timeline(steps, length)
+        cues = lead_ins(got)
+        flat = [t for cue in cues for t in cue]
+        if any(t < 0 for t in flat):
+            bad.append((line, length, "before the take"))
+        if len(flat) != len(set(flat)):
+            bad.append((line, length, "overlap"))
+        for cue, step in zip(cues, [s for i, s in enumerate(got) if i and got[i][0] - got[i - 1][0] >= 5]):
+            if cue[-1] != step[0] - 1:
+                bad.append((line, length, "not leading into its step"))
+check("Every shot at every length: 5 flashes into each step there's room for, never before the take, never overlapping",
+      not bad, bad[:5])
+
+walk = next(steps for _, stop, steps in plans if steps[1][2].startswith("Walk in and keep going. Don't look back."))
+check("WALKAWAY (30 s since 1.24): flashes at 13–17 into Stop and look out, and 22–26 into Hold still",
+      lead_ins(timeline(walk, 30)) == [[13, 14, 15, 16, 17], [22, 23, 24, 25, 26]], lead_ins(timeline(walk, 30)))
+
+clone = next(steps for _, stop, steps in plans if steps[0][2].startswith("Empty frame. Stay out of shot"))
+check("CLONE (3:00 since 1.24): 10 s empty, a new spot every 30 s, walk out for the last 20",
+      [s for s, _, _ in timeline(clone, 180)] == [0, 10, 40, 70, 100, 130, 160])
+
+# ONE TAKE (TakeDirector.startOneTake): each part for its length, 5 flashes into the next, clones nudged to a new spot
+# every 30 seconds and into walking out for the last 30, then the walk-back flicker.
+ONE_SRC = (ROOT / "ShotGuide" / "Models" / "OneTake.swift").read_text(encoding="utf-8")
+body = ONE_SRC.split("var defaultLength: Double {", 1)[1].split("\n    }\n", 1)[0]
+LENGTH = {}
+for cases, value in re.findall(r"case ([.\w, ]+?):\s*return ([\d.]+)", body):
+    for case in re.findall(r"\.(\w+)", cases):
+        LENGTH[case] = float(value)
+ORDER = re.findall(r"case (\w+)\n", ONE_SRC.split("enum OneTakePart", 1)[1].split("var id", 1)[0])
+
+
+def one_take_cues(parts, lengths, found_after=0.0):
+    """Every flash, and when the walk-back flicker comes, for a ONE TAKE where MATCH CUT's part finds you
+    `found_after` seconds after it begins."""
+    flashes, clock, events = [], 0.0, []
+    for i, part in enumerate(parts):
+        start = clock
+        if part == "matchCut":
+            found = start + found_after
+            flashes += [found + k for k in range(5)]
+            clock = found + 5
+            events.append(("move", clock))
+        end = clock + lengths[i]
+        if part == "clones" and end - clock >= 60:
+            nudge = clock + 30
+            while nudge <= end - 60:
+                flashes += [nudge - k for k in (5, 4, 3, 2, 1)]
+                nudge += 30
+            flashes += [end - 30 - k for k in (5, 4, 3, 2, 1)]
+        if i + 1 < len(parts):
+            flashes += [end - k for k in (5, 4, 3, 2, 1)]
+        events.append((part, start, end))
+        clock = end
+    return sorted(flashes), clock, events
+
+
+lengths = [LENGTH[p] for p in ORDER]
+flashes, back, events = one_take_cues(ORDER, lengths, found_after=12)
+check("ONE TAKE: no two flashes at once, all inside the take", len(flashes) == len(set(flashes)) and min(flashes) >= 0
+      and max(flashes) < back, flashes)
+check("ONE TAKE: MATCH CUT's 30 seconds start 5 s after it finds you, so finding you never eats into them",
+      ("move", 197.0) in events and ("matchCut", 180.0, 227.0) in events, events)
+check("ONE TAKE: clones nudged at 30, 60 and 90 s in, and told to walk out 30 s before the end",
+      [t for t in flashes if 227 < t < 377] == [252, 253, 254, 255, 256, 282, 283, 284, 285, 286, 312, 313, 314, 315,
+                                                316, 342, 343, 344, 345, 346], [t for t in flashes if 227 < t < 377])
+check("ONE TAKE: you walk back at 6:17 here (6:00 of parts, 12 s finding you and the 5 flashes into your move)",
+      back == 377, back)
 
 print(f"{sum(results)} of {len(results)} passed")
 sys.exit(0 if all(results) else 1)

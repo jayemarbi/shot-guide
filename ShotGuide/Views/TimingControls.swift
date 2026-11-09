@@ -3,6 +3,8 @@ import SwiftUI
 /// The countdown and stopping options. Every shot has the same ones.
 struct TimingControls: View {
     @Binding var timing: ShotTiming
+    /// ONE TAKE ends when you stop it, so it only has the countdown (1.24).
+    var showsStopping = true
 
     static let countdownSteps: [Double] = [0, 3, 5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300, 600]
     static let lengthSteps: [Double] = [3, 5, 6, 8, 10, 12, 15, 20, 25, 30, 35, 40, 45, 60, 90, 120, 180, 300, 600, 900, 1200, 1800, 3600]
@@ -16,22 +18,29 @@ struct TimingControls: View {
                 steps: Self.countdownSteps,
                 format: { $0 == 0 ? "Off" : clockString($0) })
 
-            Toggle(isOn: $timing.stopsByItself) {
-                Label("Stops by itself", systemImage: "stop.circle")
-            }
-            .tint(.orange)
-
-            if timing.stopsByItself {
-                StepPicker(
-                    title: "Length",
-                    systemImage: "hourglass",
-                    value: $timing.length,
-                    steps: Self.lengthSteps,
-                    format: { clockString($0) })
-            } else {
-                Text("Keeps rolling until you press stop, volume up or your Bluetooth remote. Volume down marks a moment instead.")
+            if !showsStopping {
+                Text("Keeps rolling after the last part until you stop it, so you're filmed walking back. Your remote moves "
+                    + "you on to the next part, and stops it after the last one.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            } else {
+                Toggle(isOn: $timing.stopsByItself) {
+                    Label("Stops by itself", systemImage: "stop.circle")
+                }
+                .tint(.orange)
+
+                if timing.stopsByItself {
+                    StepPicker(
+                        title: "Length",
+                        systemImage: "hourglass",
+                        value: $timing.length,
+                        steps: Self.lengthSteps,
+                        format: { clockString($0) })
+                } else {
+                    Text("Keeps rolling until you press stop, volume up or your Bluetooth remote. Volume down marks a moment instead.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }

@@ -10,10 +10,14 @@ enum ClipPrep {
         ShotType.voiceover.rawValue
     ]
 
+    /// The longest take that gets a cutout on the phone, in seconds.
+    static let longestMasked: Double = 120
+
     static func needsMask(_ clip: Clip) -> Bool {
-        // DANCE takes can run a whole song, which would take ages to cut out on the phone, so they're skipped.
+        // DANCE takes can run a whole song, and long takes like ONE TAKE and CLONE several minutes (1.24), which would
+        // take ages to cut out on the phone and heat it up, so they're skipped: the editor cuts you out of those.
         clip.isOnPhone && clip.inShot && clip.shot != ShotType.timelapse.rawValue && clip.shot != ShotType.dance.rawValue
-            && clip.maskFileName == nil
+            && clip.durationSeconds <= longestMasked && clip.maskFileName == nil
     }
 
     static func needsCaptions(_ clip: Clip) -> Bool {

@@ -327,9 +327,26 @@ struct GuideWay: Identifiable {
         }
         if !shot.variants.isEmpty {
             return shot.variants.indices.map { index in
-                GuideWay(id: "version-\(index)", title: shot.variants[index], purpose: nil, note: nil,
-                         plans: plans(variant: index, role: nil, inShot: nil))
+                // MATCH CUT's versions are its moves: what you do, and where the edit cuts (1.24).
+                let move = shot == .matchCut ? MatchMove(rawValue: index) : nil
+                return GuideWay(id: "version-\(index)", title: shot.variants[index],
+                                purpose: move.map { $0.summary + ". " + $0.cut }, note: nil,
+                                plans: plans(variant: index, role: nil, inShot: nil))
             }
+        }
+        if shot == .oneTake {
+            // Its parts as you've set them, with what each counts as (1.24).
+            let setup = OneTakeSetup.load()
+            let parts = setup.parts.map { part -> String in
+                let name = part == .matchCut ? "MATCH CUT · \(setup.matchMove.title)" : part.shot.title
+                return "\(part.title) (\(name)) \(clockString(setup.length(of: part)))"
+            }
+            var plan = shot.plan(take: 1, inShot: true, variant: 0)
+            plan.steps = setup.steps()
+            plan.manualLength = setup.total
+            return [GuideWay(id: "shot", title: nil,
+                             purpose: "Parts: " + parts.joined(separator: ", ") + ", then you walk back.", note: nil,
+                             plans: [plan])]
         }
         return [GuideWay(id: "shot", title: nil, purpose: nil, note: nil,
                          plans: plans(variant: 0, role: nil, inShot: nil))]
@@ -428,8 +445,9 @@ extension ShotType {
             return "You tiny under something huge, stacked up by the telephoto: on a ridge with a peak towering behind, at "
                 + "the foot of a waterfall, on a headland under the cliffs, or at the base of a city tower."
         case .matchCut:
-            return "The same pose in the same spot of the frame at every stop: on the summit, at the falls, on the beach, "
-                + "in the city. Cut together, it looks like one move across the whole trip."
+            return "One move, done once at every place, the same size in the frame each time: a run across the summit, "
+                + "a leap at the falls, arms out on the beach, a spin in the snow. Cut together on the same moment of the "
+                + "move, it looks like one move while the places change around you."
         case .moment:
             return "Real, unposed moments together with the place around you: lying in the grass at a lookout, a kiss at "
                 + "the waterhole, walking hand in hand along the sand, a slow spin in the snow, or coffee with a view."
@@ -437,8 +455,10 @@ extension ShotType {
             return "A slow circle around your partner as they stand still or look out, with the background turning behind "
                 + "them: on a summit, a rock in the river, the end of a jetty, or a quiet plaza."
         case .clone:
-            return "Three of you in one frame, each doing something different: sitting on a rock, pointing at the view, "
-                + "reading a map. It works best somewhere open in even light, like a summit plateau, the sand or a lawn."
+            return "A few minutes of you all over one still frame, doing something different at each spot: sitting on a "
+                + "rock, pointing at the view, reading a map, with the frame empty at the start and end. The edit puts "
+                + "several of you in at once. It works best somewhere open in even light, like a summit plateau, the "
+                + "sand or a lawn."
         case .dance:
             return "You dancing or lip-syncing with a big view behind you: a lookout over the valley, the beach at sunset, "
                 + "a mountain meadow, or a rooftop over the city."
@@ -477,6 +497,11 @@ extension ShotType {
             return "Walking into where you're staying for the first time: the door opening, the view from the window, the "
                 + "bed, the balcony. A cabin in the trees, a beach house deck, a tent with a view, or a hotel room over "
                 + "the city."
+        case .oneTake:
+            return "One tripod spot with a big view, and you moving through it: the empty lookout, you walking out to "
+                + "the edge of the falls or the ridge, standing small in the view, coming back for a real moment, your "
+                + "MATCH CUT move, then you all over the frame for clones. A path or ledge leading out into the view does "
+                + "half the work."
         }
     }
 }

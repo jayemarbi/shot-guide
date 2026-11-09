@@ -153,6 +153,7 @@ class Clip:
     scene: object = None
     scene_confirmed: object = None
     name: object = None
+    parts: object = None      # ONE TAKE (1.24): a list of dicts, like ClipPart
 
     @property
     def case(self):
@@ -504,7 +505,7 @@ for role, body in plans:
     found[role] = (group, lens, fps, stab, stop, filming, steps)
 expected = {
     "establishing": ("inHand", "ultraWide", "30", "cinematic", "20", "landscape"),
-    "human-scale": ("inShot", "ultraWide", "30", "off", "30", "landscape"),
+    "human-scale": ("inShot", "ultraWide", "30", "off", "45", "landscape"),   # longer since 1.24
     "alternative": ("inHand", "wide", "30", "cinematic", "25", "landscape"),
     "vertical-hero": ("inHand", "ultraWide", "30", "cinematic", "20", "portrait"),
 }
@@ -745,9 +746,238 @@ check("A place named after its only named clip: renaming the place renames that 
 check("Names never change the day's counts",
       day_coverage(clips, 1, "general") == day_coverage([replace(c, name=None) for c in clips], 1, "general"))
 
+# ---------------------------------------------------------------- ONE TAKE and Skip (1.24), ported from OneTake.swift
+ONE_SRC = (MODELS / "OneTake.swift").read_text(encoding="utf-8")
+
+
+def one_take_table(header):
+    body = ONE_SRC.split(header, 1)[1].split("\n    }\n", 1)[0]
+    table = {}
+    for cases, value in re.findall(r"case ([.\w, ]+?):\s*return (.+)", body):
+        for case in re.findall(r"\.(\w+)", cases):
+            table[case] = value.strip()
+    return table
+
+
+PART_ORDER = re.findall(r"case (\w+)\n", ONE_SRC.split("enum OneTakePart", 1)[1].split("var id", 1)[0])
+PART_SHOT = {k: v.lstrip(".") for k, v in one_take_table("var shot: ShotType {").items()}
+PART_ROLES = {k: re.findall(r'"([\w-]+)"', v) for k, v in one_take_table("var roleOrder: [String] {").items()}
+PART_LENGTH = {k: float(v) for k, v in one_take_table("var defaultLength: Double {").items()}
+ONE_TAKE_SHOTS = re.findall(r"\.(\w+)", ONE_SRC.split("static let shots: [ShotType] = [", 1)[1].split("]", 1)[0])
+
+
+def part_take(c, part):
+    """Clip.partTake: a part as a take of its shot, with the clip's place, time, light and check."""
+    own = part.get("usable")
+    return replace(c, id=part["id"], shot=part["shot"], take=part["take"], role=part.get("role"),
+                   variant=part.get("variant"), in_shot=part["in_shot"], at=c.at + timedelta(seconds=part["start"]),
+                   duration=max(0, part["end"] - part["start"]), planned=None,
+                   usable=own if own is not None else c.usable, favourite=False, parts=None)
+
+
+def all_takes(clips):
+    """Trip.allTakes: each ONE TAKE as itself and its parts."""
+    out = []
+    for c in clips:
+        out.append(c)
+        if c.shot == "ONETAKE":
+            out.extend(part_take(c, p) for p in (c.parts or []))
+    return out
+
+
+def one_take_plan(clips, parts, day, trip_type="general"):
+    """Trip.oneTakePlan on a day at one place: what each part counts as."""
+    taken, result = set(), []
+    for part in parts:
+        shot = PART_SHOT[part]
+        cov = coverage(all_takes(clips), (shot, None), day, trip_type)
+        order = PART_ROLES[part]
+        if not order:
+            result.append((part, None, not cov["complete"] and shot not in taken))
+            taken.add(shot)
+            continue
+        covered = {rid for rid, n in cov["lines"].items() if n > 0}
+        free = [r for r in order if shot + "." + r not in taken]
+        role = next((r for r in free if r not in covered), free[0] if free else order[0])
+        taken.add(shot + "." + role)
+        result.append((part, role, role in cov["open"]))
+    return result
+
+
+def filmed_ranges(starts, walk_back_at, duration):
+    out = []
+    for i, start in enumerate(starts):
+        nxt = starts[i + 1] if i + 1 < len(starts) else (walk_back_at if walk_back_at is not None else duration)
+        out.append((start, max(start, min(nxt, duration))))
+    return out
+
+
+def next_take(clips, shot_raw, day):
+    return max([c.take for c in all_takes(clips) if c.shot == shot_raw and c.day == day] or [0]) + 1
+
+
+one_take_ids = [0]
+
+
+def film_one_take(clips, parts, starts, duration, walk_back_at=None, move="Run across", day=1, at=None, **kw):
+    """Films a ONE TAKE the way ShotCameraView.saveTake and OneTakeRun.clipParts do, and adds it to `clips`."""
+    reached = parts[:len(starts)]
+    fills = {p: role for p, role, _ in one_take_plan(clips, reached, day)}
+    ranges = filmed_ranges(starts, walk_back_at, duration)
+    takes, made = {}, []
+    for part, (start, end) in zip(reached, ranges):
+        if end - start < 0.5:
+            continue
+        shot = RAW[PART_SHOT[part]]
+        take = takes.get(shot) or next_take(clips, shot, day)
+        takes[shot] = take + 1
+        one_take_ids[0] += 1
+        made.append({"id": f"p{one_take_ids[0]}", "part": part, "shot": shot, "take": take, "role": fills[part],
+                     "variant": move if part == "matchCut" else None, "in_shot": part != "emptyFrame",
+                     "start": start, "end": end})
+    one_take_ids[0] += 1
+    c = Clip(id=f"ot{one_take_ids[0]}", shot="ONETAKE", take=next_take(clips, "ONETAKE", day),
+             at=at or datetime(2026, 11, 14, 10, 0), day=day, in_shot=True, duration=duration, parts=made, **kw)
+    clips.append(c)
+    return c
+
+
+def default_starts(parts):
+    starts, clock = [], 0.0
+    for p in parts:
+        starts.append(clock)
+        clock += PART_LENGTH[p]
+    return starts, clock
+
+
+def suggestions(clips, day, trip_type="general"):
+    """Trip.nextSuggestions: the rows still needed, lowest level first, with ONE TAKE before the first of its shots
+    when two or more of them are needed at that level. One entry per skip key."""
+    takes = all_takes(clips)
+    out, seen = [], set()
+
+    def add(shot, half, role):
+        key = RAW[shot] + ("" if half is None else f"-{half}")
+        if key not in seen:
+            seen.add(key)
+            out.append((shot, half, role, key))
+
+    for level in ("light", "everyday", "full"):
+        rows = missing(takes, level, day, trip_type)
+        one_rows = [r for r in rows if r[0][0] in ONE_TAKE_SHOTS]
+        for row in rows:
+            slot = row[0]
+            if len(one_rows) >= 2 and row is one_rows[0]:
+                add("oneTake", None, None)
+            cov = coverage(takes, slot, day, trip_type)
+            add(slot[0], slot[1], next_role(slot[0], None, cov["open"]))
+    return out
+
+
+def next_suggestion(clips, day, skipped=(), trip_type="general"):
+    every = suggestions(clips, day, trip_type)
+    return next((s for s in every if s[3] not in skipped), every[0] if every else None)
+
+
+def skip(clips, day, skipped, key):
+    """TripStore.skipNext: once everything's skipped, start again from the top."""
+    skipped = list(skipped) + ([key] if key not in skipped else [])
+    left = [s for s in suggestions(clips, day) if s[3] not in skipped]
+    return skipped if left else []
+
+
+PARTS = PART_ORDER
+starts, total = default_starts(PARTS)
+check("ONE TAKE's parts, in order: empty frame, walk in, in the view, moment, MATCH CUT, clones",
+      PARTS == ["emptyFrame", "walkIn", "inView", "moment", "matchCut", "clones"], PARTS)
+check("By default it runs 6:00 before you walk back (30, 30, 60, 60, 30 and 150 seconds)", total == 360, total)
+
+clips = []
+first = film_one_take(clips, PARTS, starts, duration=400, walk_back_at=total)
+takes = all_takes(clips)
+check("A ONE TAKE counts as itself and its six parts", len(takes) == 7, len(takes))
+check("Its parts fill Establishing, Into the view, Me in the view, With the place, MATCH CUT and CLONE",
+      [(p["shot"], p["role"]) for p in first.parts] == [("WIDE", "establishing"), ("WALKAWAY", "into-view"),
+                                                       ("WIDE", "human-scale"), ("MOMENT", "with-place"),
+                                                       ("MATCHCUT", None), ("CLONE", None)],
+      [(p["shot"], p["role"]) for p in first.parts])
+wide = coverage(takes, ("wide", None), 1, "general")
+check("WIDE 2/3 from one take: two parts, two roles", wide["done"] == 2 and wide["open"] == {"alternative"}, wide["done"])
+check("WALKAWAY 1/2, MOMENT 1/2, MATCH CUT 1/1, CLONE 1/1",
+      [coverage(takes, (s, None), 1, "general")["done"] for s in ("walkaway", "moment", "matchCut", "clone")]
+      == [1, 1, 1, 1])
+check("Its parts are takes 1 and 2 of WIDE, and take 1 of the rest", [p["take"] for p in first.parts] == [1, 1, 2, 1, 1, 1])
+check("The clones part ends where you set off back, not where you stopped it",
+      first.parts[-1]["start"] == 210 and first.parts[-1]["end"] == 360)
+check("The MATCH CUT part carries the move", first.parts[4]["variant"] == "Run across")
+light = day_coverage(takes, 1, "general")["light"]
+check("One ONE TAKE fills 3 of a light day's 10 (WIDE twice, MOMENT)", light[0] == 3, light)
+
+second = film_one_take(clips, PARTS, starts, duration=380, walk_back_at=total)
+plan2 = [(p["shot"], p["role"]) for p in second.parts]
+check("A second ONE TAKE fills the second roles: Another angle, New spot or action, Together",
+      plan2[:4] == [("WIDE", "alternative"), ("WALKAWAY", "new-spot"), ("WIDE", "human-scale"), ("MOMENT", "together")],
+      plan2)
+takes = all_takes(clips)
+check("…so WIDE is 3/3, WALKAWAY 2/2 and MOMENT 2/2, and the repeats are extras",
+      [coverage(takes, (s, None), 1, "general")["done"] for s in ("wide", "walkaway", "moment")] == [3, 2, 2]
+      and coverage(takes, ("wide", None), 1, "general")["statuses"][second.parts[2]["id"]] == "extra")
+
+clips = []
+skipped_parts = film_one_take(clips, PARTS, starts, duration=400, walk_back_at=total)
+skipped_parts.parts[4]["usable"] = False
+check("A part you mark not usable (you skipped the move) doesn't count, and MATCH CUT stays to film",
+      coverage(all_takes(clips), ("matchCut", None), 1, "general")["done"] == 0)
+clips = [replace(skipped_parts, usable=False)]
+check("Marking the whole take not usable stops every part counting…",
+      sum(coverage(all_takes(clips), (s, None), 1, "general")["done"] for s in ("wide", "walkaway", "moment")) == 0)
+clips[0].parts[1]["usable"] = True
+check("…except a part you mark usable yourself",
+      coverage(all_takes(clips), ("walkaway", None), 1, "general")["done"] == 1)
+
+clips = []
+quick = [0.0, 30.0, 31.0]
+early = film_one_take(clips, PARTS, quick, duration=50)
+check("Moving on after a second leaves a short part that doesn't count",
+      coverage(all_takes(clips), ("walkaway", None), 1, "general")["statuses"].get(early.parts[1]["id"]) == "short")
+check("Stopped during In the view: it ends at the end of the clip, and the parts after it aren't there",
+      len(early.parts) == 3 and early.parts[2]["end"] == 50)
+clips = []
+tiny = film_one_take(clips, PARTS, [0.0, 20.0], duration=20.3)
+check("A part under half a second (stopped as it began) is left out", len(tiny.parts) == 1)
+
+clips = []
+out = ["emptyFrame", "walkIn", "inView", "moment"]
+left = film_one_take(clips, out, default_starts(out)[0], duration=200, walk_back_at=180)
+check("Leave MATCH CUT and CLONE out and they're still to film, for along the trail",
+      [coverage(all_takes(clips), (s, None), 1, "general")["done"] for s in ("matchCut", "clone")] == [0, 0]
+      and len(left.parts) == 4)
+
+# Next and Skip
+clips = []
+order = [s[0] for s in suggestions(clips, 1)][:5]
+check("A new day's Next: POV, REVEAL, then ONE TAKE just before WIDE, as WIDE and MOMENT are both needed",
+      order == ["pov", "reveal", "oneTake", "wide", "moment"], order)
+skipped = skip(clips, 1, [], "POV")
+check("Skip POV: REVEAL comes forward", next_suggestion(clips, 1, skipped)[0] == "reveal")
+skipped = skip(clips, 1, skipped, "REVEAL")
+check("Skip REVEAL too: ONE TAKE", next_suggestion(clips, 1, skipped)[0] == "oneTake")
+check("After your next take, the skipped ones are back first (POV)", next_suggestion(clips, 1, [])[0] == "pov")
+everything = []
+for s in suggestions(clips, 1):
+    everything = skip(clips, 1, everything, s[3])
+check("Skip everything and it starts again from the top", everything == [] and next_suggestion(clips, 1, everything)[0] == "pov")
+check("Skip leaves out the whole shot, whatever role it was on (WIDE is one key)",
+      len([s for s in suggestions(clips, 1) if s[0] == "wide"]) == 1)
+clips = []
+film_one_take(clips, PARTS, starts, duration=400, walk_back_at=total)
+check("Once ONE TAKE has filled them, Next moves on from WIDE and MOMENT's first roles",
+      ("wide", None, "alternative", "WIDE") in suggestions(clips, 1)
+      and not any(s[0] == "moment" and s[2] == "with-place" for s in suggestions(clips, 1)))
+
 # 12. The order of the day and other features are unchanged
-check("The trip page order is the same as 1.18",
-      [s for s, _ in SLOTS] == ["home", "onTheWay", "whip", "pov", "hyperlapse", "follow", "reaction", "reveal", "wide",
+check("The trip page order is 1.18's, with ONE TAKE at the top of At the spot (1.24)",
+      [s for s, _ in SLOTS] == ["home", "onTheWay", "whip", "pov", "hyperlapse", "follow", "reaction", "reveal", "oneTake", "wide",
                                 "slomo", "talk", "walkaway", "tele", "matchCut", "moment", "orbit", "clone", "dance",
                                 "silhouette", "bRoll", "detail", "reflection", "wildlife", "food", "sounds", "ambient",
                                 "timelapse", "whip", "voiceover", "stay", "home"])
