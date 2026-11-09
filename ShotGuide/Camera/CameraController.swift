@@ -885,7 +885,7 @@ final class CameraController: NSObject, ObservableObject {
             return
         }
         let sound = session.outputs.contains(logRecorder.audioOutput)
-            ? logRecorder.audioOutput.recommendedAudioSettingsForAssetWriter(writingTo: .mov) as? [String: Any]
+            ? logRecorder.audioOutput.recommendedAudioSettingsForAssetWriter(writingTo: .mov)
             : nil
         let take = LogRecorder.Take(url: url,
                                     transform: CGAffineTransform(rotationAngle: hold.recordingAngle * .pi / 180),
