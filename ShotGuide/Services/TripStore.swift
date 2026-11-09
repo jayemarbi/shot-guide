@@ -501,11 +501,15 @@ final class TripStore: ObservableObject {
                                 alreadyThere += 1
                             }
                             verified.insert(item.lastPathComponent)
+                            // Tidies away a hidden "._" file an earlier copy left beside it.
+                            Self.stripExtendedAttributes(copy)
                             continue
                         }
                         try fileManager.removeItem(at: copy)
                     }
+                    Self.stripExtendedAttributes(item)
                     try fileManager.copyItem(at: item, to: copy)
+                    Self.stripExtendedAttributes(copy)
                     if Self.isClip(item) {
                         copied += 1
                     }
@@ -584,10 +588,30 @@ final class TripStore: ObservableObject {
     }
 
     /// Clips, masks, voiceovers and anything added from Photos: copied first, and skipped when already on the drive.
-    static let mediaExtensions: Set<String> = ["mov", "mp4", "m4v", "m4a", "heic", "heif", "jpg", "jpeg", "png", "dng"]
+    static let mediaExtensions: Set<String> = ["mov", "mp4", "m4v", "m4a", "wav", "heic", "heif", "jpg", "jpeg", "png", "dng"]
 
     static func isVideo(_ url: URL) -> Bool {
         mediaExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// Takes off a file's hidden extras (extended attributes, like where Photos got it from). On a drive formatted for
+    /// both Windows and Mac (exFAT) they're kept as a hidden "._" file beside it, which some editors try to import and
+    /// then complain about (1.25). The clips don't need them.
+    static func stripExtendedAttributes(_ url: URL) {
+        url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return }
+            let size = listxattr(path, nil, 0, XATTR_NOFOLLOW)
+            guard size > 0 else { return }
+            var buffer = [CChar](repeating: 0, count: size)
+            let read = listxattr(path, &buffer, size, XATTR_NOFOLLOW)
+            guard read > 0 else { return }
+            let names = buffer[0..<read].split(separator: 0).map {
+                String(decoding: $0.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            }
+            for name in names {
+                _ = removexattr(path, name, XATTR_NOFOLLOW)
+            }
+        }
     }
 
     /// A clip you filmed, as opposed to a cutout mask made from one.

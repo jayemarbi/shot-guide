@@ -1061,7 +1061,7 @@ struct TripView: View {
     private func copy(_ trip: Trip, to folder: URL) {
         startExport()
         Task { @MainActor in
-            await ClipPrep.prepare(tripID: tripID, store: store) { copyProgress = $0 }
+            let prep = await ClipPrep.prepare(tripID: tripID, store: store) { copyProgress = $0 }
             store.copyTrip(store.trip(id: tripID) ?? trip, to: folder, progress: { done, total in
                 copyProgress = "Copying \(done) of \(total) files to \(folder.lastPathComponent)…"
             }, completion: { result in
@@ -1069,7 +1069,7 @@ struct TripView: View {
                 switch result {
                 case .success(let summary):
                     lastCopy = summary
-                    copiedMessage = Self.copiedText(summary)
+                    copiedMessage = Self.copiedText(summary) + (prep.note.map { "\n\n" + $0 } ?? "")
                 case .failure(let error):
                     exportError = error.localizedDescription
                         + "\n\nCheck the SSD is plugged in and has space, then copy again. Clips that made it across won't be copied twice."

@@ -14,7 +14,7 @@ enum TagSuggester {
 
     static func suggestions(for url: URL) async -> [String] {
         let fileExtension = url.pathExtension.lowercased()
-        if fileExtension == "m4a" {
+        if ["m4a", "wav"].contains(fileExtension) {
             return []
         }
         if ["heic", "heif", "jpg", "jpeg", "png", "dng"].contains(fileExtension) {

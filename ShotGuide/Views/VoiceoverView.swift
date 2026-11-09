@@ -137,7 +137,7 @@ struct VoiceoverView: View {
         message = nil
         let now = Date()
         guard let url = store.newClipURL(tripID: tripID, shotName: ShotType.voiceover.rawValue, take: take, date: now,
-                                         day: day, fileExtension: "m4a") else {
+                                         day: day, fileExtension: "wav") else {
             message = "Couldn't find this trip's folder."
             return
         }

@@ -13,6 +13,10 @@ struct CaptureConfig: Equatable {
     /// Shots you're in on the tripod: with headphones in, a voice says each step in your ear while the phone's own mic
     /// records (1.24). The sound is set up as for DANCE, keeping stereo and wind reduction.
     var speaksPrompts: Bool = false
+    /// The shot zooms from one lens to another while it films (REVEAL's auto zoom), which needs the 3-lens camera (1.25).
+    var zoomsAcrossLenses: Bool = false
+    /// The phone signals you with the flash during this shot (the shots you're in, on the back camera) (1.25).
+    var usesFlash: Bool = false
 }
 
 struct RecordingResult {
@@ -80,6 +84,16 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var rolling = false
     /// The zooms this camera can do, as shown on screen, like 0.5 to 15 (1.24).
     @Published private(set) var zoomLimits: ClosedRange<Double> = 0.5...10
+    /// Why this shot isn't filming in Log when it would be, said before you film (1.25). nil when it's in Log, and for
+    /// slow motion and time-lapses, which are always the normal colour.
+    @Published private(set) var logNote: String? = nil
+    /// This shot signals you with the flash, but the camera it needs has none (1.25).
+    @Published private(set) var flashNote: String? = nil
+    /// The lens of the single camera in use, nil for the 3-lens camera (1.25): white balance only carries over between
+    /// takes on the same camera.
+    @Published private(set) var deviceLens: LensChoice? = nil
+    /// Why a take that had started couldn't be saved (1.25).
+    @Published private(set) var saveProblem: String? = nil
 
     let session = AVCaptureSession()
 
@@ -89,6 +103,8 @@ final class CameraController: NSObject, ObservableObject {
     private let dataOutput = AVCaptureVideoDataOutput()
     /// Small frames for drawing the preview through the look.
     private let previewOutput = AVCaptureVideoDataOutput()
+    /// Writes Apple Log as 10-bit HEVC, for every shot that films in Log (1.25).
+    private let logRecorder = LogRecorder()
 
     // Session-queue state
     private var device: AVCaptureDevice?
@@ -97,6 +113,12 @@ final class CameraController: NSObject, ObservableObject {
     private var pinchStart: CGFloat = 1
     /// Stop was pressed while a take was still waiting for the camera to be able to record.
     private var startCancelled = false
+    /// This shot films in Log, through `logRecorder` (1.25).
+    private var recordsLog = false
+    /// The frame rate the camera is set to.
+    private var recordFPS = 30
+    /// Golden or blue hour: the white balance stays on daylight, even when the camera's set up again (1.25).
+    private var daylightLockOn = false
 
     // Main-thread state
     private var mainConfig: CaptureConfig?
@@ -160,7 +182,9 @@ final class CameraController: NSObject, ObservableObject {
         DispatchQueue.main.async { self.phase = phase }
     }
 
-    private func applyConfiguration(_ config: CaptureConfig) {
+    /// Sets the camera up for a shot. `logRefusal` says why Log has just turned out not to work on this camera, and then
+    /// the shot is set up again in the normal colour.
+    private func applyConfiguration(_ config: CaptureConfig, logRefusal: String? = nil) {
         let isLapse = config.timelapseInterval != nil
 
         session.beginConfiguration()
@@ -198,11 +222,13 @@ final class CameraController: NSObject, ObservableObject {
             Self.preparePromptAudioSession()
         }
 
+        var hasMic = false
         if !isLapse,
            let microphone = AVCaptureDevice.default(for: .audio),
            let microphoneInput = try? AVCaptureDeviceInput(device: microphone),
            session.canAddInput(microphoneInput) {
             session.addInput(microphoneInput)
+            hasMic = true
             // Stereo and wind noise reduction where the phone's own mics support them. A clip-on mic stays as it is.
             // DANCE skips them: the song replaces the clip's sound in the edit anyway.
             if !config.playsMusic && microphoneInput.isMultichannelAudioModeSupported(.stereo) {
@@ -213,6 +239,13 @@ final class CameraController: NSObject, ObservableObject {
             }
         }
 
+        // Apple Log wherever this camera has it at the shot's frame rate, as it keeps the most for grading. Since 1.25
+        // the app writes it itself, as 10-bit HEVC: the phone's own recorder only offers Log as ProRes, so until then
+        // every clip fell back to the normal colour. Slow motion (over 60 fps) and time-lapses stay in the normal colour.
+        let wantsLog = !isLapse && config.fps <= 60
+        let logFormat = wantsLog && logRefusal == nil ? Self.pickLogFormat(device: device, fps: config.fps) : nil
+        var recordsLog = false
+        var logProblem: String? = logRefusal
         if isLapse {
             dataOutput.alwaysDiscardsLateVideoFrames = true
             dataOutput.setSampleBufferDelegate(self, queue: dataQueue)
@@ -220,13 +253,14 @@ final class CameraController: NSObject, ObservableObject {
                 session.addOutput(dataOutput)
             }
         } else {
-            if session.canAddOutput(movieOutput) {
-                session.addOutput(movieOutput)
-                // Since iOS 26 the recorder can start a moment after the camera, so the picture shows sooner. Here it
-                // starts with the camera, so a take can begin the moment the camera is ready.
-                if #available(iOS 26.0, *), movieOutput.isDeferredStartSupported {
-                    movieOutput.isDeferredStartEnabled = false
+            if logFormat != nil, session.canAddOutput(logRecorder.videoOutput) {
+                session.addOutput(logRecorder.videoOutput)
+                if hasMic, session.canAddOutput(logRecorder.audioOutput) {
+                    session.addOutput(logRecorder.audioOutput)
                 }
+                recordsLog = true
+            } else {
+                addMovieOutput()
             }
             // A second, screen-sized feed for the preview, drawn through the look.
             previewOutput.alwaysDiscardsLateVideoFrames = true
@@ -236,20 +270,27 @@ final class CameraController: NSObject, ObservableObject {
             previewOutput.setSampleBufferDelegate(self, queue: dataQueue)
             if session.canAddOutput(previewOutput) {
                 session.addOutput(previewOutput)
+            } else if recordsLog {
+                // Seeing the shot comes first: without room for both, it films in the normal colour.
+                for output in [logRecorder.videoOutput, logRecorder.audioOutput] as [AVCaptureOutput]
+                where session.outputs.contains(output) {
+                    session.removeOutput(output)
+                }
+                recordsLog = false
+                logProblem = "the phone can't show the picture while it films Log"
+                addMovieOutput()
+                if session.canAddOutput(previewOutput) {
+                    session.addOutput(previewOutput)
+                }
             }
         }
 
-        // Apple Log wherever the phone allows it, as it keeps the most for grading. Slow motion (over 60 fps)
-        // stays in the phone's normal colour, which is what it supports most reliably.
-        var usingLog = false
-        let logFormat = config.fps <= 60 ? Self.pickLogFormat(device: device, fps: config.fps) : nil
-        if let format = logFormat ?? Self.pickFormat(device: device, fps: config.fps) {
+        if let format = (recordsLog ? logFormat : nil) ?? Self.pickFormat(device: device, fps: config.fps) {
             do {
                 try device.lockForConfiguration()
                 device.activeFormat = format
-                if logFormat != nil, format.supportedColorSpaces.contains(.appleLog) {
+                if recordsLog {
                     device.activeColorSpace = .appleLog
-                    usingLog = true
                 } else if format.supportedColorSpaces.contains(.sRGB) {
                     device.activeColorSpace = .sRGB
                 }
@@ -257,10 +298,15 @@ final class CameraController: NSObject, ObservableObject {
             } catch {}
         }
 
-        let connection = isLapse ? dataOutput.connection(with: .video) : movieOutput.connection(with: .video)
-        if let connection {
-            if !isLapse, connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90
+        let recordOutput: AVCaptureOutput = isLapse ? dataOutput : (recordsLog ? logRecorder.videoOutput : movieOutput)
+        if let connection = recordOutput.connection(with: .video) {
+            if !isLapse {
+                // The phone's recorder turns its clip by the connection's angle, set again as each take starts. Log
+                // frames stay as the sensor sees them, wide, and the clip is turned as it's written.
+                let angle: CGFloat = recordsLog ? 0 : 90
+                if connection.isVideoRotationAngleSupported(angle) {
+                    connection.videoRotationAngle = angle
+                }
             }
             if connection.isVideoStabilizationSupported {
                 connection.preferredVideoStabilizationMode = Self.stabilisationMode(config.stabilisation, format: device.activeFormat)
@@ -269,7 +315,7 @@ final class CameraController: NSObject, ObservableObject {
                 connection.automaticallyAdjustsVideoMirroring = false
                 connection.isVideoMirrored = false
             }
-            if !isLapse, movieOutput.availableVideoCodecTypes.contains(.hevc) {
+            if !isLapse, !recordsLog, movieOutput.availableVideoCodecTypes.contains(.hevc) {
                 movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
             }
         }
@@ -286,14 +332,34 @@ final class CameraController: NSObject, ObservableObject {
         }
         session.commitConfiguration()
 
-        // HEVC is chosen again now the format is in place. Chosen only inside the configuration, it can be reset to the
-        // format's default, which for Apple Log is ProRes: ProRes can't film 4K60 to the phone (only to an external
-        // drive), and its files are huge. If this format can't do HEVC in Log, the shot films in the normal colour.
-        if !isLapse {
-            usingLog = chooseHEVC(device: device, config: config, usingLog: usingLog)
+        if recordsLog {
+            // Log needs its 10 bits, which can only be asked for now the format's in place. Without them, the shot is
+            // set up again in the normal colour.
+            if device.activeColorSpace != .appleLog || !logRecorder.chooseTenBit() {
+                applyConfiguration(config, logRefusal: "this camera can't give it the 10-bit picture it needs")
+                return
+            }
+        } else if !isLapse {
+            chooseHEVC()
         }
+        self.recordsLog = recordsLog
+        if wantsLog && !recordsLog && logProblem == nil {
+            if config.lens == .front {
+                logProblem = "the front camera has no Log"
+            } else if device.isVirtualDevice {
+                logProblem = "the 3-lens camera this shot needs has no Log"
+            } else if logFormat == nil {
+                logProblem = "this camera has no Log at \(config.fps) fps"
+            } else {
+                logProblem = "the phone couldn't set up Log recording"
+            }
+        }
+        let logText = logProblem.map { "Not filming in Log: \($0)." }
+        let flashText = config.usesFlash && !device.hasTorch
+            ? "This camera has no flash, so the signals only come through your AirPods." : nil
+        let singleLens = Self.singleLens(device)
         let front = config.lens == .front
-        let previewInLog = usingLog
+        let previewInLog = recordsLog
         dataQueue.async {
             self.previewFront = front
             self.previewLog = previewInLog
@@ -316,11 +382,18 @@ final class CameraController: NSObject, ObservableObject {
             if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
                 device.whiteBalanceMode = .continuousAutoWhiteBalance
             }
+            // Golden and blue hour: back on daylight, as setting the camera up again (like changing lens) put it on
+            // automatic (1.25).
+            if daylightLockOn, device.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
+                device.setWhiteBalanceModeLocked(with: Self.clampGains(Self.daylightGains(device), device: device),
+                                                 completionHandler: nil)
+            }
             let bias = min(max(config.exposureBias, device.minExposureTargetBias), device.maxExposureTargetBias)
             device.setExposureTargetBias(bias, completionHandler: nil)
             device.unlockForConfiguration()
         } catch {}
         exposureBias = config.exposureBias
+        recordFPS = isLapse ? 30 : fps
         let startZoom = Double(device.videoZoomFactor) * Self.displayMultiplier(device)
 
         if !session.isRunning {
@@ -334,8 +407,11 @@ final class CameraController: NSObject, ObservableObject {
         for lens in lenses {
             titles[lens] = Self.label(for: lens, device: device)
         }
-        let label = Self.label(for: config.lens, device: device)
-        let formatText = "\(Self.resolutionName(dimensions)) · " + (isLapse ? "Time-lapse" : "\(fps) fps") + (usingLog ? " · Log" : "")
+        // The lens actually in use: a phone without the shot's lens films it on the main camera.
+        let shownLens = singleLens ?? config.lens
+        let label = Self.label(for: shownLens, device: device)
+        let formatText = "\(Self.resolutionName(dimensions)) · " + (isLapse ? "Time-lapse" : "\(fps) fps")
+            + (recordsLog ? " · Log" : " · Normal colour")
         let torch = device.hasTorch
         let multiplier = Self.displayMultiplier(device)
         let lowest = Double(device.minAvailableVideoZoomFactor) * multiplier
@@ -343,12 +419,15 @@ final class CameraController: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.zoomLimits = lowest...highest
             self.activeFPS = isLapse ? 30 : fps
-            self.activeLog = usingLog
-            self.logActive = usingLog
+            self.activeLog = recordsLog
+            self.logActive = recordsLog
+            self.logNote = logText
+            self.flashNote = flashText
+            self.deviceLens = singleLens
             self.activeResolution = resolution
             self.availableLenses = lenses
             self.lensTitles = titles
-            self.currentLens = config.lens
+            self.currentLens = shownLens
             self.lensLabel = label
             self.formatLabel = formatText
             self.hasTorch = torch
@@ -358,53 +437,66 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
-    /// Sets the movie to HEVC, on the session queue after the configuration is committed. If the format can't do HEVC
-    /// in Apple Log, it switches this shot to the normal-colour format, which can. Returns whether it's still Log.
-    private func chooseHEVC(device: AVCaptureDevice, config: CaptureConfig, usingLog: Bool) -> Bool {
-        guard let connection = movieOutput.connection(with: .video) else { return usingLog }
-        if movieOutput.availableVideoCodecTypes.contains(.hevc) {
-            movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
-            return usingLog
+    /// The phone's own recorder, for the shots in the normal colour. Inside a configuration.
+    private func addMovieOutput() {
+        guard session.canAddOutput(movieOutput) else { return }
+        session.addOutput(movieOutput)
+        // Since iOS 26 the recorder can start a moment after the camera, so the picture shows sooner. Here it starts
+        // with the camera, so a take can begin the moment the camera is ready.
+        if #available(iOS 26.0, *), movieOutput.isDeferredStartSupported {
+            movieOutput.isDeferredStartEnabled = false
         }
-        guard usingLog, let normal = Self.pickFormat(device: device, fps: config.fps) else { return usingLog }
-        do {
-            try device.lockForConfiguration()
-            device.activeFormat = normal
-            if normal.supportedColorSpaces.contains(.sRGB) {
-                device.activeColorSpace = .sRGB
-            }
-            device.unlockForConfiguration()
-        } catch {
-            return usingLog
-        }
-        if connection.isVideoStabilizationSupported {
-            connection.preferredVideoStabilizationMode = Self.stabilisationMode(config.stabilisation, format: normal)
-        }
-        if movieOutput.availableVideoCodecTypes.contains(.hevc) {
-            movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
-        }
-        return false
+    }
+
+    /// Sets the phone's recorder to HEVC again now the format's in place: set only inside the configuration, it can be
+    /// reset to the format's default. On the session queue.
+    private func chooseHEVC() {
+        guard let connection = movieOutput.connection(with: .video),
+              movieOutput.availableVideoCodecTypes.contains(.hevc) else { return }
+        movieOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc], for: connection)
     }
 
     // MARK: Lenses and zoom
 
-    /// Jumps to a lens's zoom. Also used after each take to undo any pinch zoom, front camera included.
+    /// Changes lens. On the 3-lens camera it zooms there. Otherwise each lens is its own camera (1.25), and changing
+    /// lens sets the camera up again, which takes a moment.
     func setLens(_ lens: LensChoice) {
         sessionQueue.async {
             guard let device = self.device else { return }
-            let factor = Self.clampZoom(Self.zoomFactor(for: lens, device: device), device: device)
-            do {
-                try device.lockForConfiguration()
-                device.ramp(toVideoZoomFactor: factor, withRate: 8)
-                device.unlockForConfiguration()
-            } catch {}
-            let label = Self.label(for: lens, device: device)
-            let zoom = Double(factor) * Self.displayMultiplier(device)
-            DispatchQueue.main.async {
-                self.currentLens = lens
-                self.lensLabel = label
-                self.displayZoom = zoom
+            if let own = Self.singleLens(device), own != lens, own != .front, lens != .front, var config = self.config {
+                config.lens = lens
+                self.config = config
+                DispatchQueue.main.async { self.mainConfig?.lens = lens }
+                self.applyConfiguration(config)
+                return
             }
+            self.jumpZoom(to: lens, device: device)
+        }
+    }
+
+    /// After a take: undoes any pinch zoom (1.25). A single camera goes back to its own lens, so a lens you picked
+    /// stays picked; the 3-lens camera goes back to `lens`, the shot's own.
+    func resetZoom(to lens: LensChoice) {
+        sessionQueue.async {
+            guard let device = self.device else { return }
+            self.jumpZoom(to: Self.singleLens(device) ?? lens, device: device)
+        }
+    }
+
+    /// Jumps to a lens's zoom on the camera in use. On the session queue.
+    private func jumpZoom(to lens: LensChoice, device: AVCaptureDevice) {
+        let factor = Self.clampZoom(Self.zoomFactor(for: lens, device: device), device: device)
+        do {
+            try device.lockForConfiguration()
+            device.ramp(toVideoZoomFactor: factor, withRate: 8)
+            device.unlockForConfiguration()
+        } catch {}
+        let label = Self.label(for: lens, device: device)
+        let zoom = Double(factor) * Self.displayMultiplier(device)
+        DispatchQueue.main.async {
+            self.currentLens = lens
+            self.lensLabel = label
+            self.displayZoom = zoom
         }
     }
 
@@ -633,12 +725,16 @@ final class CameraController: NSObject, ObservableObject {
     /// Locks the white balance for a take, so the colour can't drift partway through: to daylight in golden and blue
     /// hour, to `reuse` (from a take just before, at the same spot, on the same lens), or to what the camera has
     /// settled on. Reports it, with the ISO and shutter speed, for the catalogue.
+    /// Since 1.25 most shots film on a single camera, which lets the colour be set; the 3-lens camera only lets it be
+    /// held where it is, so its takes can't be matched. `lens` is the shot's, used for the 3-lens camera.
     func beginTake(reuse: WhiteBalance?, daylight: Bool, lens: LensChoice, completion: @escaping (TakeSettings) -> Void) {
         sessionQueue.async {
             guard let device = self.device else {
                 DispatchQueue.main.async { completion(TakeSettings()) }
                 return
             }
+            // Gains only carry over to the same camera.
+            let camera = Self.singleLens(device) ?? lens
             var balance: WhiteBalance? = nil
             do {
                 try device.lockForConfiguration()
@@ -646,7 +742,7 @@ final class CameraController: NSObject, ObservableObject {
                     var gains = device.deviceWhiteBalanceGains
                     if daylight {
                         gains = Self.daylightGains(device)
-                    } else if let reuse, reuse.lens == lens.rawValue {
+                    } else if let reuse, reuse.lens == camera.rawValue {
                         gains = AVCaptureDevice.WhiteBalanceGains(redGain: reuse.red, greenGain: reuse.green, blueGain: reuse.blue)
                     }
                     // Only real numbers: just after the camera opens it may not have worked the colour out yet,
@@ -654,11 +750,11 @@ final class CameraController: NSObject, ObservableObject {
                     if [gains.redGain, gains.greenGain, gains.blueGain].allSatisfy({ $0.isFinite && $0 > 0 }) {
                         gains = Self.clampGains(gains, device: device)
                         device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
-                        balance = Self.whiteBalance(gains, device: device, lens: lens)
+                        balance = Self.whiteBalance(gains, device: device, lens: camera)
                     }
                 } else if device.isWhiteBalanceModeSupported(.locked) {
                     device.whiteBalanceMode = .locked
-                    balance = Self.whiteBalance(Self.clampGains(device.deviceWhiteBalanceGains, device: device), device: device, lens: lens)
+                    balance = Self.whiteBalance(Self.clampGains(device.deviceWhiteBalanceGains, device: device), device: device, lens: camera)
                 }
                 device.unlockForConfiguration()
             } catch {}
@@ -675,6 +771,7 @@ final class CameraController: NSObject, ObservableObject {
     /// the colour the takes will have. Otherwise it's automatic.
     func setDaylightLock(_ on: Bool) {
         sessionQueue.async {
+            self.daylightLockOn = on
             guard let device = self.device else { return }
             do {
                 try device.lockForConfiguration()
@@ -694,13 +791,18 @@ final class CameraController: NSObject, ObservableObject {
                                                                                                 tint: 0))
     }
 
-    /// Back to automatic white balance after a take.
+    /// Back to automatic white balance after a take, or to daylight in golden and blue hour.
     func endTake() {
         sessionQueue.async {
-            guard let device = self.device, device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) else { return }
+            guard let device = self.device else { return }
             do {
                 try device.lockForConfiguration()
-                device.whiteBalanceMode = .continuousAutoWhiteBalance
+                if self.daylightLockOn, device.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
+                    device.setWhiteBalanceModeLocked(with: Self.clampGains(Self.daylightGains(device), device: device),
+                                                     completionHandler: nil)
+                } else if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                    device.whiteBalanceMode = .continuousAutoWhiteBalance
+                }
                 device.unlockForConfiguration()
             } catch {}
         }
@@ -733,15 +835,58 @@ final class CameraController: NSObject, ObservableObject {
         let used: PhoneHold = mainConfig?.lens == .front ? .upright : hold
         activeSideways = used.isSideways
         startProblem = nil
+        saveProblem = nil
         rolling = false
         sessionQueue.async {
             self.startCancelled = false
             if let interval {
                 self.startLapse(to: url, interval: interval, hold: used, latitude: latitude, longitude: longitude)
+            } else if self.recordsLog {
+                self.startLog(to: url, hold: used, latitude: latitude, longitude: longitude, triesLeft: 60)
             } else {
                 self.startMovie(to: url, hold: used, latitude: latitude, longitude: longitude, triesLeft: 60)
             }
         }
+    }
+
+    /// Starts a take in Apple Log (1.25), once the camera's running: the movie begins with its next frame. Like the
+    /// phone's recorder, it waits up to about 6 seconds for the camera.
+    private func startLog(to url: URL, hold: PhoneHold, latitude: Double?, longitude: Double?, triesLeft: Int) {
+        guard !startCancelled else { return }
+        guard session.isRunning, session.outputs.contains(logRecorder.videoOutput) else {
+            if triesLeft > 0 {
+                sessionQueue.asyncAfter(deadline: .now() + 0.1) {
+                    self.startLog(to: url, hold: hold, latitude: latitude, longitude: longitude, triesLeft: triesLeft - 1)
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.startProblem = "The camera isn't running."
+                    self.deliver(url: nil)
+                }
+            }
+            return
+        }
+        let sound = session.outputs.contains(logRecorder.audioOutput)
+            ? logRecorder.audioOutput.recommendedAudioSettingsForAssetWriter(writingTo: .mov) as? [String: Any]
+            : nil
+        let take = LogRecorder.Take(url: url,
+                                    transform: CGAffineTransform(rotationAngle: hold.recordingAngle * .pi / 180),
+                                    fps: recordFPS,
+                                    metadata: Self.locationMetadata(latitude: latitude, longitude: longitude),
+                                    audioSettings: sound,
+                                    clock: session.synchronizationClock ?? CMClockGetHostTimeClock())
+        logRecorder.start(take, onStarted: { [weak self] lag in
+            // The take's clock starts when its first frame was filmed, so marks and steps line up with the clip.
+            self?.recordingStarted(lag: lag)
+        }, onFailed: { [weak self] problem, hadStarted in
+            guard let self else { return }
+            if hadStarted {
+                self.saveProblem = problem
+            } else {
+                self.startProblem = problem
+            }
+            self.deliver(url: nil)
+        })
     }
 
     /// Starts the movie once the camera can record, on the session queue. Since iOS 26 the recorder only gets going
@@ -793,9 +938,22 @@ final class CameraController: NSObject, ObservableObject {
         ticker?.invalidate()
         ticker = nil
         let isLapse = mainConfig?.timelapseInterval != nil
+        // The moment stop was pressed, by the camera's clock: a Log take keeps the frames filmed before it.
+        let pressed = CMClockGetTime(session.synchronizationClock ?? CMClockGetHostTimeClock())
         sessionQueue.async {
             if isLapse {
                 self.finishLapse()
+            } else if self.recordsLog {
+                // A start still waiting for the camera mustn't go ahead.
+                self.startCancelled = true
+                self.logRecorder.stop(at: pressed) { url, problem in
+                    DispatchQueue.main.async {
+                        if url == nil, let problem {
+                            self.saveProblem = problem
+                        }
+                        self.deliver(url: url)
+                    }
+                }
             } else if self.movieOutput.isRecording {
                 self.movieOutput.stopRecording()
             } else {
@@ -813,9 +971,10 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
-    private func recordingStarted() {
+    /// `lag`: how long ago the take's first frame was filmed, so its clock matches the clip.
+    private func recordingStarted(lag: Double = 0) {
         rolling = true
-        startTime = CACurrentMediaTime()
+        startTime = CACurrentMediaTime() - lag
         onRecordingStarted?()
         elapsed = 0
         ticker?.invalidate()
@@ -940,21 +1099,85 @@ final class CameraController: NSObject, ObservableObject {
 
     // MARK: Picking the camera, format and settings
 
+    /// The camera for a shot (1.25): the single camera for its lens, as that's what films Apple Log and lets the white
+    /// balance be set. The 3-lens camera, which zooms smoothly from lens to lens, is only for shots that zoom across
+    /// lenses while filming, and for a shot that signals with the flash on a lens with no flash of its own (the ultra
+    /// wide), as long as it films Log too.
     static func pickDevice(for config: CaptureConfig) -> AVCaptureDevice? {
         if config.lens == .front {
             return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
         }
+        let main = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
         if config.fps > 60 {
             // High frame rates come from the main (1x) camera on its own.
-            return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+            return main
         }
-        let types: [AVCaptureDevice.DeviceType] = [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
+        let multi = multiLensCamera()
+        if config.zoomsAcrossLenses, let multi {
+            return multi
+        }
+        guard let single = singleCamera(for: config.lens) ?? main else { return multi }
+        if config.usesFlash, !single.hasTorch, let multi, multi.hasTorch,
+           pickLogFormat(device: multi, fps: config.fps) != nil {
+            return multi
+        }
+        return single
+    }
+
+    /// The camera that zooms smoothly from lens to lens, where the phone has one.
+    static func multiLensCamera() -> AVCaptureDevice? {
+        let types: [AVCaptureDevice.DeviceType] = [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera]
         for type in types {
             if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
                 return device
             }
         }
         return nil
+    }
+
+    /// The back camera for a lens on its own.
+    static func singleCamera(for lens: LensChoice) -> AVCaptureDevice? {
+        switch lens {
+        case .ultraWide: return AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
+        case .tele: return AVCaptureDevice.default(.builtInTelephotoCamera, for: .video, position: .back)
+        case .wide: return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+        case .front: return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+        }
+    }
+
+    /// Which lens a single camera is. nil for the 3-lens camera.
+    static func singleLens(_ device: AVCaptureDevice) -> LensChoice? {
+        if device.position == .front { return .front }
+        switch device.deviceType {
+        case .builtInUltraWideCamera: return .ultraWide
+        case .builtInTelephotoCamera: return .tele
+        case .builtInWideAngleCamera: return .wide
+        default: return nil
+        }
+    }
+
+    /// The telephoto's zoom as the Camera app shows it, like 5x on the 16 Pro or 3x on the 15 Pro: from where the 3-lens
+    /// camera hands over to it.
+    static let teleZoom: Double = {
+        if let triple = AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back),
+           let last = triple.virtualDeviceSwitchOverVideoZoomFactors.last?.doubleValue, last > 0 {
+            // The 3-lens camera counts from the ultra wide, which shows as 0.5x.
+            return last * 0.5
+        }
+        if let dual = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back),
+           let first = dual.virtualDeviceSwitchOverVideoZoomFactors.first?.doubleValue, first > 0 {
+            return first
+        }
+        return 2
+    }()
+
+    /// A lens's zoom as shown on screen, for the single cameras.
+    static func lensZoom(_ lens: LensChoice) -> Double {
+        switch lens {
+        case .ultraWide: return 0.5
+        case .wide, .front: return 1
+        case .tele: return teleZoom
+        }
     }
 
     /// The best 16:9, 8-bit format that reaches the frame rate: 4K first, then 1080p.
@@ -1052,12 +1275,20 @@ final class CameraController: NSObject, ObservableObject {
         device.constituentDevices.contains { $0.deviceType == type }
     }
 
-    /// On phones with an ultra wide, the camera's zoom factor 1 is what the Camera app calls 0.5x.
+    /// Turns the camera's zoom factor into what the Camera app shows. A single camera's factor 1 is its own lens, like
+    /// 0.5x for the ultra wide; on the 3-lens camera, factor 1 is the ultra wide.
     static func displayMultiplier(_ device: AVCaptureDevice) -> Double {
-        hasConstituent(device, .builtInUltraWideCamera) ? 0.5 : 1.0
+        if let lens = singleLens(device) {
+            return lensZoom(lens)
+        }
+        return hasConstituent(device, .builtInUltraWideCamera) ? 0.5 : 1.0
     }
 
     static func zoomFactor(for lens: LensChoice, device: AVCaptureDevice) -> CGFloat {
+        // A single camera is at its own lens with no zoom.
+        if singleLens(device) != nil {
+            return 1
+        }
         let switchOvers = device.virtualDeviceSwitchOverVideoZoomFactors.map { CGFloat($0.doubleValue) }
         let hasUltraWide = hasConstituent(device, .builtInUltraWideCamera)
         switch lens {
@@ -1077,17 +1308,28 @@ final class CameraController: NSObject, ObservableObject {
         min(max(factor, device.minAvailableVideoZoomFactor), min(device.maxAvailableVideoZoomFactor, 40))
     }
 
+    /// The lens buttons. On the 3-lens camera, the lenses it zooms between; otherwise every back camera the phone has,
+    /// each its own camera.
     static func lenses(for device: AVCaptureDevice, config: CaptureConfig) -> [LensChoice] {
         guard config.lens != .front, config.fps <= 60 else { return [] }
         var lenses: [LensChoice] = []
-        if hasConstituent(device, .builtInUltraWideCamera) { lenses.append(.ultraWide) }
-        lenses.append(.wide)
-        if hasConstituent(device, .builtInTelephotoCamera) { lenses.append(.tele) }
+        if singleLens(device) == nil {
+            if hasConstituent(device, .builtInUltraWideCamera) { lenses.append(.ultraWide) }
+            lenses.append(.wide)
+            if hasConstituent(device, .builtInTelephotoCamera) { lenses.append(.tele) }
+        } else {
+            if singleCamera(for: .ultraWide) != nil { lenses.append(.ultraWide) }
+            lenses.append(.wide)
+            if singleCamera(for: .tele) != nil { lenses.append(.tele) }
+        }
         return lenses.count > 1 ? lenses : []
     }
 
     static func label(for lens: LensChoice, device: AVCaptureDevice) -> String {
         if lens == .front { return "Front" }
+        if singleLens(device) != nil {
+            return formatZoom(lensZoom(lens))
+        }
         return formatZoom(Double(zoomFactor(for: lens, device: device)) * displayMultiplier(device))
     }
 

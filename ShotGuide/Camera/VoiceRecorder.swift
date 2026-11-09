@@ -36,12 +36,17 @@ final class VoiceRecorder: ObservableObject {
         micName = MicCheck.currentMicName() ?? ""
     }
 
+    /// Uncompressed, as a .wav (1.25): 48 kHz, 24-bit, about 9 MB a minute. Until 1.25 it was compressed to 64 kbit/s,
+    /// fine to listen to but thin for cleaning up a voice in the edit.
     func start(to url: URL) -> Bool {
         let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
             AVSampleRateKey: 48_000,
             AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.max.rawValue
+            AVLinearPCMBitDepthKey: 24,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false
         ]
         guard let recorder = try? AVAudioRecorder(url: url, settings: settings) else { return false }
         recorder.isMeteringEnabled = true

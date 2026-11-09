@@ -213,7 +213,8 @@ struct ShotPlan {
 
     var captureConfig: CaptureConfig {
         CaptureConfig(lens: lens, fps: fps, stabilisation: stabilisation, timelapseInterval: timelapseInterval,
-                      exposureBias: exposureBias, playsMusic: shot == .dance, speaksPrompts: signalsDuringTake)
+                      exposureBias: exposureBias, playsMusic: shot == .dance, speaksPrompts: signalsDuringTake,
+                      zoomsAcrossLenses: zoomRamp != nil, usesFlash: isInShot && lens != .front)
     }
 
     /// Phone-in-hand shots start straight away; shots you're in count you in.

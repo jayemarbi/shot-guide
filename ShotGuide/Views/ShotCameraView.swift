@@ -694,6 +694,21 @@ struct ShotCameraView: View {
                     Text([camera.lensLabel, camera.formatLabel].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption)
                         .foregroundStyle(Color.white.opacity(0.8))
+                    // Said before you film, so a shot that can't be in Log, or can't flash, is never a surprise (1.25).
+                    if let note = camera.logNote {
+                        Label(note, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.orange)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let note = camera.flashNote {
+                        Label(note, systemImage: "bolt.slash.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.yellow)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     filmingLine
                     if let glow = glowNow {
                         Label(glow == .golden ? "Golden hour: keeping the warm light" : "Blue hour: keeping the blue light",
@@ -1556,8 +1571,10 @@ struct ShotCameraView: View {
         // before at the same spot on the same lens, so they match in the edit.
         takeSettings = nil
         let glow = glowNow
+        // The camera actually filming, which may be a lens you picked (1.25).
+        let filmingLens = camera.deviceLens ?? used.lens
         let reuse = glow == nil ? Self.sameSpotWhiteBalance(in: store.trip(id: tripID), latitude: coordinate?.latitude,
-                                                            longitude: coordinate?.longitude, at: now, lens: used.lens) : nil
+                                                            longitude: coordinate?.longitude, at: now, lens: filmingLens) : nil
         camera.beginTake(reuse: reuse, daylight: glow != nil, lens: used.lens) { settings in
             takeSettings = settings
         }
@@ -1629,7 +1646,7 @@ struct ShotCameraView: View {
         if shot == .matchCut {
             camera.setZoom(display: startZoom)
         } else {
-            camera.setLens(used.lens)
+            camera.resetZoom(to: used.lens)
         }
         if used.exposure == .lockAtStart {
             camera.resetFocusAndExposure()
@@ -1644,6 +1661,8 @@ struct ShotCameraView: View {
         guard let result else {
             if let problem = camera.startProblem {
                 message = "That take didn't start. The camera said \u{201C}\(problem)\u{201D}. Try again."
+            } else if let problem = camera.saveProblem {
+                message = "That take couldn't be saved: \(problem) Try again."
             } else {
                 message = "That take didn't save. Try again."
             }

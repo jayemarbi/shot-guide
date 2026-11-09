@@ -123,8 +123,9 @@ struct Clip: Codable, Identifiable, Hashable {
         ["heic", "heif", "jpg", "jpeg", "png", "dng"].contains((fileName as NSString).pathExtension.lowercased())
     }
 
+    /// VOICEOVER: .m4a until 1.25, uncompressed .wav since.
     var isAudio: Bool {
-        (fileName as NSString).pathExtension.lowercased() == "m4a"
+        ["m4a", "wav"].contains((fileName as NSString).pathExtension.lowercased())
     }
 }
 

@@ -88,6 +88,8 @@ enum MediaImporter {
         guard let destination = store.newClipURL(tripID: tripID, shotName: shotName, take: take, date: date, day: day,
                                                  fileExtension: fileExtension) else { return false }
         try FileManager.default.copyItem(at: source, to: destination)
+        // No hidden extras from Photos, which would follow it to the SSD as a "._" file (1.25).
+        TripStore.stripExtendedAttributes(destination)
 
         let light = SunCalc.light(at: date, latitude: latitude, longitude: longitude)
         var tags = light.tags
