@@ -20,6 +20,7 @@ struct TripView: View {
     @State private var pickedItems: [PhotosPickerItem] = []
     @State private var importMessage: String? = nil
     @State private var showFacts = false
+    @State private var showCosts = false
     /// The day on screen. nil follows the latest day.
     @State private var selectedDay: Int? = nil
     @State private var showStartDay = false
@@ -221,6 +222,7 @@ struct TripView: View {
             typeRow(day)
             lightRow(trip)
             allShotsRow
+            costsRow(trip, day: number)
             if trip.clips(onDay: number).isEmpty {
                 Label("Before your first shot, wipe your lens. A smudge softens every shot.", systemImage: "sparkles")
                     .font(.subheadline)
@@ -604,6 +606,33 @@ struct TripView: View {
         .foregroundStyle(Color.primary)
     }
 
+    /// What you've spent at this day's place, and the quickest way to add a cost the moment you pay (1.27).
+    private func costsRow(_ trip: Trip, day: Int) -> some View {
+        let costs = trip.dayFacts(day)?.costs ?? []
+        let line = costs.isEmpty ? "Add what you pay for as you go, for price lists and cost guides"
+            : "Spent here: " + trip.totalLine(costs)
+        return Button {
+            showCosts = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "banknote.fill")
+                    .frame(width: 28)
+                    .foregroundStyle(Color.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Costs")
+                        .font(.headline)
+                    Text(line)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "plus.circle.fill")
+                    .foregroundStyle(Color.orange)
+            }
+        }
+        .foregroundStyle(Color.primary)
+    }
+
     /// The light right now, so you know when to save the shots worth taking your time over.
     private func lightRow(_ trip: Trip) -> some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
@@ -670,6 +699,9 @@ struct TripView: View {
         view
             .sheet(isPresented: $showFacts) {
                 TripFactsView(tripID: tripID, day: currentDay)
+            }
+            .sheet(isPresented: $showCosts) {
+                CostsSheet(tripID: tripID, day: currentDay)
             }
             .sheet(isPresented: $showStartDay) {
                 StartDaySheet(tripID: tripID) { number in
@@ -805,7 +837,8 @@ struct TripView: View {
         lastCopy = nil
     }
 
-    private static let factsHint = "Distance, time, cost and tips about this place, for on-screen text and guide reels"
+    private static let factsHint = "Distance, time, costs, your rating, links and tips about this place, for on-screen text, "
+        + "guides, price lists and rated lists"
 
     /// The facts about this day's place. Days at the same place share them.
     private func factsRow(_ trip: Trip, day: Int) -> some View {

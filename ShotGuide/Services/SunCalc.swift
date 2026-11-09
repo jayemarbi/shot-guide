@@ -93,6 +93,42 @@ enum SunCalc {
         return nil
     }
 
+    /// A day's sunrise, the end of the morning's golden hour, the start of the evening's, and sunset (1.27). nil for
+    /// any the sun doesn't reach that day.
+    struct DayTimes {
+        var sunrise: Date?
+        var morningGoldenEnds: Date?
+        var eveningGoldenStarts: Date?
+        var sunset: Date?
+    }
+
+    /// The sun's times on the calendar day of `date` in `timeZone`, checked minute by minute in one pass.
+    static func dayTimes(on date: Date, timeZone: TimeZone, latitude: Double, longitude: Double) -> DayTimes {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let start = calendar.startOfDay(for: date)
+        var times = DayTimes()
+        var previous = elevation(at: start, latitude: latitude, longitude: longitude).degrees
+        for minute in 1...(24 * 60) {
+            let time = start.addingTimeInterval(Double(minute) * 60)
+            let current = elevation(at: time, latitude: latitude, longitude: longitude).degrees
+            if times.sunrise == nil && previous < horizon && current >= horizon {
+                times.sunrise = time
+            }
+            if times.morningGoldenEnds == nil && previous < 6 && current >= 6 {
+                times.morningGoldenEnds = time
+            }
+            if times.eveningGoldenStarts == nil && previous > 6 && current <= 6 {
+                times.eveningGoldenStarts = time
+            }
+            if times.sunset == nil && previous > horizon && current <= horizon {
+                times.sunset = time
+            }
+            previous = current
+        }
+        return times
+    }
+
     /// A line for the trip page about the light, like "Golden hour starts at 5:41 pm, sunset at 6:12 pm."
     static func lightLine(at date: Date, latitude: Double, longitude: Double) -> String? {
         let sun = elevation(at: date, latitude: latitude, longitude: longitude)

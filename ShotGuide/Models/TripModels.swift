@@ -136,54 +136,93 @@ struct SkippedNext: Codable, Hashable {
     var keys: [String]
 }
 
-/// Details about the place, for text on screen and "things to know before you go" reels.
+/// Details about the place, for text on screen and "things to know before you go" reels. Since 1.27 it also keeps
+/// what you spent there, your rating, links and more, for price lists, cost guides and rated lists.
 struct TripFacts: Codable, Hashable {
     var distance = ""
     var time = ""
     var elevation = ""
     var difficulty = ""
+    /// What it costs anyone to visit, like "Free" or "$15 park pass". What you spent is in `costs`.
     var cost = ""
     var parking = ""
     var gettingThere = ""
     var bestTime = ""
     var tips = ""
+    // 1.27
+    var bookings = ""
+    var facilities = ""
+    var weather = ""
+    var crowds = ""
+    var bestBit = ""
+    var downsides = ""
+    var looksLike = ""
+    var lines = ""
+    /// Your score out of 10, in halves. nil until you rate it.
+    var rating: Double? = nil
+    /// What you paid for here, as many as you like, in the trip's currency.
+    var costs: [CostItem] = []
+    var links: [FactLink] = []
 
     init() {}
 
     // Each field is optional when reading, so facts saved by older versions still load.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        distance = try container.decodeIfPresent(String.self, forKey: .distance) ?? ""
-        time = try container.decodeIfPresent(String.self, forKey: .time) ?? ""
-        elevation = try container.decodeIfPresent(String.self, forKey: .elevation) ?? ""
-        difficulty = try container.decodeIfPresent(String.self, forKey: .difficulty) ?? ""
-        cost = try container.decodeIfPresent(String.self, forKey: .cost) ?? ""
-        parking = try container.decodeIfPresent(String.self, forKey: .parking) ?? ""
-        gettingThere = try container.decodeIfPresent(String.self, forKey: .gettingThere) ?? ""
-        bestTime = try container.decodeIfPresent(String.self, forKey: .bestTime) ?? ""
-        tips = try container.decodeIfPresent(String.self, forKey: .tips) ?? ""
+        func string(_ key: CodingKeys) throws -> String {
+            try container.decodeIfPresent(String.self, forKey: key) ?? ""
+        }
+        distance = try string(.distance)
+        time = try string(.time)
+        elevation = try string(.elevation)
+        difficulty = try string(.difficulty)
+        cost = try string(.cost)
+        parking = try string(.parking)
+        gettingThere = try string(.gettingThere)
+        bestTime = try string(.bestTime)
+        tips = try string(.tips)
+        bookings = try string(.bookings)
+        facilities = try string(.facilities)
+        weather = try string(.weather)
+        crowds = try string(.crowds)
+        bestBit = try string(.bestBit)
+        downsides = try string(.downsides)
+        looksLike = try string(.looksLike)
+        lines = try string(.lines)
+        rating = try container.decodeIfPresent(Double.self, forKey: .rating)
+        costs = try container.decodeIfPresent([CostItem].self, forKey: .costs) ?? []
+        links = try container.decodeIfPresent([FactLink].self, forKey: .links) ?? []
+    }
+
+    /// "9" or "8.5", for "9/10".
+    static func score(_ rating: Double) -> String {
+        rating == rating.rounded() ? String(Int(rating)) : String(format: "%.1f", rating)
     }
 
     private var labelled: [(String, String)] {
         [("Distance", distance), ("Time", time), ("Elevation gain", elevation), ("Difficulty", difficulty),
-         ("Cost", cost), ("Parking", parking), ("Getting there", gettingThere), ("Best time to go", bestTime), ("Tips", tips)]
+         ("Entry cost", cost), ("Parking", parking), ("Getting there", gettingThere), ("Best time to go", bestTime),
+         ("Bookings and permits", bookings), ("Facilities", facilities), ("Weather on the day", weather),
+         ("How busy", crowds), ("Rating", rating.map { Self.score($0) + "/10" } ?? ""), ("Best bit", bestBit),
+         ("Downsides", downsides), ("Looks like", looksLike), ("Lines and ideas", lines), ("Tips", tips)]
             .map { ($0.0, $0.1.trimmingCharacters(in: .whitespacesAndNewlines)) }
             .filter { !$0.1.isEmpty }
     }
 
-    var isEmpty: Bool { labelled.isEmpty }
+    var isEmpty: Bool { labelled.isEmpty && costs.isEmpty && links.isEmpty }
 
-    /// One line for the trip page, like "8 km return · 3 hours · Hard · Free".
+    /// One line for the trip page, like "8 km return · 3 hours · Hard · Free · 9/10".
     var summary: String {
-        [distance, time, difficulty, cost]
+        ([distance, time, difficulty, cost] + [rating.map { Self.score($0) + "/10" } ?? ""])
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
     }
 
-    /// The facts as plain text, for facts.txt next to the clips.
+    /// The facts as plain text, for facts.txt next to the clips. The costs and links are added by the trip, which
+    /// knows the currency (see `Trip.factsText`).
     var text: String {
-        labelled.map { "\($0.0): \($0.1)" }.joined(separator: "\n") + "\n"
+        labelled.map { "\($0.0): \($0.1)" }.joined(separator: "\n")
     }
 }
 
@@ -211,6 +250,10 @@ struct Trip: Codable, Identifiable, Hashable {
     var nextScene: SceneChoice? = nil
     /// Shots you've skipped on the Next row since your last take (1.24).
     var skippedNext: SkippedNext? = nil
+    /// How many people the costs are shared between, for the cost each (1.27). nil is the number you picked last.
+    var costPeople: Int? = nil
+    /// The currency costs are in, like "USD" (1.27). nil is the country's own.
+    var currencyCode: String? = nil
 
     var regionLine: String {
         [state, country].filter { !$0.isEmpty }.joined(separator: ", ")
@@ -223,19 +266,6 @@ struct Trip: Codable, Identifiable, Hashable {
             return saved
         }
         return place == allDays.first?.place ? facts : nil
-    }
-
-    /// Each place's facts once, in the order of the days, for facts.txt.
-    var factsText: String? {
-        var places: [String] = []
-        var sections: [String] = []
-        for day in allDays where !places.contains(day.place) {
-            places.append(day.place)
-            if let facts = dayFacts(day.number), !facts.isEmpty {
-                sections.append(day.place + "\n\n" + facts.text)
-            }
-        }
-        return sections.isEmpty ? nil : sections.joined(separator: "\n")
     }
 
     var allDays: [TripDay] {

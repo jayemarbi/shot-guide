@@ -65,6 +65,13 @@ final class TripStore: ObservableObject {
         } else {
             try? FileManager.default.removeItem(at: factsURL)
         }
+        // What you spent, for spreadsheets (1.27).
+        let costsURL = folder.appendingPathComponent("costs.csv")
+        if let costs = Self.costsCSV(for: trip) {
+            try Data(costs.utf8).write(to: costsURL, options: .atomic)
+        } else {
+            try? FileManager.default.removeItem(at: costsURL)
+        }
     }
 
     private func replace(_ trip: Trip) {
@@ -120,10 +127,43 @@ final class TripStore: ObservableObject {
         trips.removeAll { $0.id == id }
     }
 
-    /// Saves the facts about a day's place. Other days at the same place share them.
+    /// Saves the facts about a day's place. Other days at the same place share them. Its costs and links are left as
+    /// they are: they're saved as you add them (1.27).
     func updateFacts(_ facts: TripFacts, tripID: UUID, day number: Int) {
+        changeFacts(tripID: tripID, day: number) { saved in
+            var updated = facts
+            updated.costs = saved.costs
+            updated.links = saved.links
+            saved = updated
+        }
+    }
+
+    /// Saves what you spent at a day's place, straight away as you add or change a cost (1.27).
+    func updateCosts(_ costs: [CostItem], tripID: UUID, day number: Int) {
+        changeFacts(tripID: tripID, day: number) { $0.costs = costs }
+    }
+
+    /// Saves the links for a day's place, straight away as you add or change one (1.27).
+    func updateLinks(_ links: [FactLink], tripID: UUID, day number: Int) {
+        changeFacts(tripID: tripID, day: number) { $0.links = links }
+    }
+
+    /// How many people a trip's costs are shared between, and their currency (1.27). New trips start with the number
+    /// of people you picked last.
+    func updateCostSettings(tripID: UUID, people: Int, currency: String) {
+        guard var trip = self.trip(id: tripID) else { return }
+        trip.costPeople = max(1, people)
+        trip.currencyCode = currency
+        Money.lastPeople = people
+        replace(trip)
+    }
+
+    /// Changes the facts about a day's place and saves them. Other days at the same place share them.
+    private func changeFacts(tripID: UUID, day number: Int, _ change: (inout TripFacts) -> Void) {
         guard var trip = self.trip(id: tripID) else { return }
         let place = trip.day(number).place
+        var facts = trip.dayFacts(number) ?? TripFacts()
+        change(&facts)
         var all = trip.placeFacts ?? [:]
         all[place] = facts.isEmpty ? nil : facts
         trip.placeFacts = all.isEmpty ? nil : all
@@ -743,6 +783,28 @@ final class TripStore: ObservableObject {
         // ONE TAKE (1.24): a row for each part, with the same file, and where the part starts and ends in it.
         "part_of", "part", "part_start_s", "part_end_s"
     ]
+
+    /// costs.csv (1.27): every cost on the trip with its place, day, when you added it, kind, amount, currency, the
+    /// number of people it's shared between and the cost each. nil when there are none.
+    static func costsCSV(for trip: Trip) -> String? {
+        let rows = trip.costsByPlace.flatMap { entry in entry.costs.map { (place: entry.place, cost: $0) } }
+        guard !rows.isEmpty else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let people = trip.people
+        var lines = [["Place", "Day", "Added", "Cost", "Kind", "Amount", "Currency", "People", "Each"].joined(separator: ",")]
+        for row in rows {
+            let day = row.cost.day ?? 1
+            formatter.timeZone = trip.timeZone(onDay: day)
+            let fields = [row.place, String(day), formatter.string(from: row.cost.addedAt), row.cost.name,
+                          row.cost.kind?.title ?? "", String(format: "%.2f", row.cost.amount), trip.currency,
+                          String(people), String(format: "%.2f", row.cost.amount / Double(people))]
+            lines.append(fields.map { csvField($0) }.joined(separator: ","))
+        }
+        // The byte-order mark makes Excel on Windows read accents correctly.
+        return "\u{FEFF}" + lines.joined(separator: "\r\n") + "\r\n"
+    }
 
     static func catalogCSV(for trip: Trip) -> String {
         var lines = [catalogColumns.joined(separator: ",")]
