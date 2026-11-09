@@ -1580,8 +1580,9 @@ struct ShotCameraView: View {
         }
         songStartAtRecording = nil
         if shot == .dance {
-            camera.onRecordingStarted = {
-                songStartAtRecording = song.heardPosition
+            camera.onRecordingStarted = { lag in
+                // Where the song was when the clip's first frame was filmed.
+                songStartAtRecording = song.heardPosition.map { max(0, $0 - lag) }
             }
         }
         // How long the take is set to run, so a take stopped well short doesn't count as coverage. Time-lapses

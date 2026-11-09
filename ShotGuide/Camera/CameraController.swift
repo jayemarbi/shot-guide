@@ -129,8 +129,9 @@ final class CameraController: NSObject, ObservableObject {
     private var startTime: CFTimeInterval = 0
     private var ticker: Timer?
     private var finishHandler: ((RecordingResult?) -> Void)?
-    /// Called on the main thread the moment the file starts recording, for timing a song to the clip.
-    var onRecordingStarted: (() -> Void)?
+    /// Called on the main thread the moment the file starts recording, for timing a song to the clip, with how long
+    /// ago the clip's first frame was filmed (1.25: a Log take hears about its first frame a moment after).
+    var onRecordingStarted: ((Double) -> Void)?
 
     // Time-lapse state, used on dataQueue
     private var writer: AVAssetWriter?
@@ -975,7 +976,7 @@ final class CameraController: NSObject, ObservableObject {
     private func recordingStarted(lag: Double = 0) {
         rolling = true
         startTime = CACurrentMediaTime() - lag
-        onRecordingStarted?()
+        onRecordingStarted?(lag)
         elapsed = 0
         ticker?.invalidate()
         ticker = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
