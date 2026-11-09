@@ -850,9 +850,19 @@ def default_starts(parts):
     return starts, clock
 
 
+def one_take_can_fill(row):
+    """OneTakePart.canFill (1.25.1): one of ONE TAKE's shots and, for those with roles, a role one of its parts fills.
+    MOMENT with only Together left doesn't count: that's filmed on its own, upright."""
+    shot, open_roles = row[0][0], row[2]
+    if shot not in ONE_TAKE_SHOTS:
+        return False
+    fillable = {r for part, s in PART_SHOT.items() if s == shot for r in PART_ROLES[part]}
+    return not open_roles or any(r in fillable for r in open_roles)
+
+
 def suggestions(clips, day, trip_type="general"):
     """Trip.nextSuggestions: the rows still needed, lowest level first, with ONE TAKE before the first of its shots
-    when two or more of them are needed at that level. One entry per skip key."""
+    when two or more of them that it can fill are needed at that level. One entry per skip key."""
     takes = all_takes(clips)
     out, seen = [], set()
 
@@ -864,7 +874,7 @@ def suggestions(clips, day, trip_type="general"):
 
     for level in ("light", "everyday", "full"):
         rows = missing(takes, level, day, trip_type)
-        one_rows = [r for r in rows if r[0][0] in ONE_TAKE_SHOTS]
+        one_rows = [r for r in rows if one_take_can_fill(r)]
         for row in rows:
             slot = row[0]
             if len(one_rows) >= 2 and row is one_rows[0]:
@@ -915,13 +925,16 @@ check("One ONE TAKE fills 3 of a light day's 10 (WIDE twice, MOMENT)", light[0] 
 
 second = film_one_take(clips, PARTS, starts, duration=380, walk_back_at=total)
 plan2 = [(p["shot"], p["role"]) for p in second.parts]
-check("A second ONE TAKE fills the second roles: Another angle, New spot or action, Together",
-      plan2[:4] == [("WIDE", "alternative"), ("WALKAWAY", "new-spot"), ("WIDE", "human-scale"), ("MOMENT", "together")],
+check("A second ONE TAKE fills the second roles: Another angle, New spot or action; its moment is With the place again",
+      plan2[:4] == [("WIDE", "alternative"), ("WALKAWAY", "new-spot"), ("WIDE", "human-scale"), ("MOMENT", "with-place")],
       plan2)
 takes = all_takes(clips)
-check("…so WIDE is 3/3, WALKAWAY 2/2 and MOMENT 2/2, and the repeats are extras",
-      [coverage(takes, (s, None), 1, "general")["done"] for s in ("wide", "walkaway", "moment")] == [3, 2, 2]
-      and coverage(takes, ("wide", None), 1, "general")["statuses"][second.parts[2]["id"]] == "extra")
+moment = coverage(takes, ("moment", None), 1, "general")
+check("…so WIDE is 3/3 and WALKAWAY 2/2, the repeats are extras, and MOMENT stays 1/2 with Together to film upright",
+      [coverage(takes, (s, None), 1, "general")["done"] for s in ("wide", "walkaway", "moment")] == [3, 2, 1]
+      and coverage(takes, ("wide", None), 1, "general")["statuses"][second.parts[2]["id"]] == "extra"
+      and moment["statuses"][second.parts[3]["id"]] == "extra" and moment["open"] == {"together"},
+      moment)
 
 clips = []
 skipped_parts = film_one_take(clips, PARTS, starts, duration=400, walk_back_at=total)
@@ -981,6 +994,64 @@ check("The trip page order is 1.18's, with ONE TAKE at the top of At the spot (1
                                 "slomo", "talk", "walkaway", "tele", "matchCut", "moment", "orbit", "clone", "dance",
                                 "silhouette", "bRoll", "detail", "reflection", "wildlife", "food", "sounds", "ambient",
                                 "timelapse", "whip", "voiceover", "stay", "home"])
+
+# 13. Which way each shot is filmed (1.25.1): every reel plays upright, so the big views stay landscape and the rest
+# are filmed upright, with REVEAL and B-ROLL set for each version or role
+FILMING = switch_values(SHOT_SRC, "    var filming: Filming {", "portrait")
+BIG_VIEWS = {"wide", "tele", "walkaway", "silhouette", "timelapse", "reflection", "matchCut", "onTheWay", "wildlife",
+             "oneTake"}
+check("The big views stay landscape: WIDE, TELE, WALKAWAY, SILHOUETTE, TIMELAPSE, REFLECTION, MATCH CUT, ON THE WAY, "
+      "WILDLIFE and ONE TAKE", {s for s, f in FILMING.items() if f == "landscape"} == BIG_VIEWS,
+      sorted(s for s, f in FILMING.items() if f == "landscape"))
+check("MOMENT and HOME are upright now, and so is every shot that went either way",
+      all(FILMING[s] == "portrait" for s in ("moment", "home", "detail", "sounds", "slomo", "dance", "orbit", "stay",
+                                              "hyperlapse", "ambient", "clone")))
+check("Only REVEAL and B-ROLL go both ways, as their versions and roles differ",
+      {s for s, f in FILMING.items() if f == "either"} == {"reveal", "bRoll"})
+
+
+def plan_filming(block, label):
+    """The orientation a plan in ShotType.swift sets, or None when it leaves it to the shot."""
+    found = re.search(r"filming: \.(\w+)", block)
+    return found.group(1) if found else None
+
+
+broll_block = SHOT_SRC.split("        case .bRoll:\n            switch roleID {", 1)[1].split("\n        case .stay:", 1)[0]
+broll = {}
+for role, body in re.findall(r'(?:case "([\w-]+)":|default:)(.*?)(?=\n            case "|\n            default:|\Z)',
+                             broll_block, re.S):
+    broll[role or ROLES["bRoll"][0].id] = plan_filming(body, role)
+check("B-ROLL's plans cover every role, the first (Atmosphere) by default",
+      set(broll) == {r.id for r in ROLES["bRoll"]} and ROLES["bRoll"][0].id == "atmosphere", sorted(broll))
+check("B-ROLL: Atmosphere, Movement and New lens or angle landscape; People, Local character, Transition, Nature and "
+      "Into the light upright",
+      broll == {"atmosphere": "landscape", "movement": "landscape", "lens-angle": "landscape", "people": "portrait",
+                "local": "portrait", "transition": "portrait", "nature": "portrait", "into-light": "portrait"}, broll)
+
+reveal_block = SHOT_SRC.split("        case .reveal:\n            if variantIndex == 0 {", 1)[1].split("\n        case .timelapse:", 1)[0]
+reveal_plans = reveal_block.split("return ShotPlan(")[1:]
+reveal = dict(zip(["Auto zoom", "Tilt up", "Walk reveal"], [plan_filming(b, None) for b in reveal_plans]))
+check("REVEAL: Auto zoom landscape (the zoom across the lenses); Walk reveal and Tilt up upright",
+      len(reveal_plans) == 3 and "zoomRamp" in reveal_plans[0] and "tilt slowly up" in reveal_plans[1]
+      and reveal == {"Auto zoom": "landscape", "Tilt up": "portrait", "Walk reveal": "portrait"}, reveal)
+snap = SHOT_SRC.split("case .snap:\n            return make(", 1)[1].split("case .", 1)[0]
+check("Still upright on their own: WIDE's vertical hero and MATCH CUT's Snap",
+      found["vertical-hero"][5] == "portrait" and plan_filming(snap, None) == "portrait")
+check("ONE TAKE's moment counts only as MOMENT · With the place, so Together is filmed on its own, upright",
+      PART_ROLES["moment"] == ["with-place"] and PART_SHOT["moment"] == "moment")
+check("ONE TAKE can't fill MOMENT · Together, so a row needing only that doesn't count towards suggesting one",
+      not one_take_can_fill((("moment", None), 1, ["together"]))
+      and one_take_can_fill((("moment", None), 2, ["together", "with-place"]))
+      and one_take_can_fill((("clone", None), 1, [])) and not one_take_can_fill((("tele", None), 1, [])))
+
+clips = []
+film_one_take(clips, PARTS, starts, duration=400, walk_back_at=total)
+check("After a ONE TAKE, Next suggests another while it can fill two shots (WIDE · Another angle, WALKAWAY · New spot)",
+      ("oneTake", None, None) in [s[:3] for s in suggestions(clips, 1)])
+clips.append(clip("WALKAWAY", "new-spot", existing=clips, in_shot=True))
+check("…but not once only WIDE · Another angle and MOMENT · Together are left: it could only fill one of them",
+      "oneTake" not in [s[0] for s in suggestions(clips, 1)]
+      and ("moment", None, "together", "MOMENT") in suggestions(clips, 1))
 
 failed = [r for r in results if not r[1]]
 for name, ok, detail in results:

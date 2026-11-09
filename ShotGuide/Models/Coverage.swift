@@ -524,7 +524,8 @@ extension Trip {
 
     /// What's worth filming next on a day, best first: the rows the lowest unfinished level still needs, in the order
     /// of the day, each with the role it still needs, then the next level's. ONE TAKE comes just before the first of its
-    /// shots when two or more of them are still needed at that level, as one set-up films them all (1.24).
+    /// shots when two or more of them are still needed at that level, as one set-up films them all (1.24), counting only
+    /// the ones it can fill (1.25.1: not MOMENT · Together).
     func nextSuggestions(day number: Int) -> [ShotSuggestion] {
         var result: [ShotSuggestion] = []
         var seen: Set<String> = []
@@ -535,7 +536,7 @@ extension Trip {
         }
         for level in CoverageLevel.allCases {
             let rows = missing(level, day: number)
-            let oneTakeRows = rows.filter { OneTakePart.shots.contains($0.slot.shot) }
+            let oneTakeRows = rows.filter { OneTakePart.canFill($0) }
             for row in rows {
                 if oneTakeRows.count >= 2, row.id == oneTakeRows.first?.id {
                     add(ShotSuggestion(shot: .oneTake))

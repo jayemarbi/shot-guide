@@ -50,13 +50,14 @@ enum OneTakePart: String, CaseIterable, Codable, Identifiable {
         self != .emptyFrame
     }
 
-    /// The roles it can fill, in order: it takes the first one not filmed yet where you are.
+    /// The roles it can fill, in order: it takes the first one not filmed yet where you are. Your moment is only ever
+    /// MOMENT · With the place: Together is filmed on its own, upright (1.25.1).
     var roleOrder: [String] {
         switch self {
         case .emptyFrame: return ["establishing", "alternative"]
         case .walkIn: return ["into-view", "new-spot"]
         case .inView: return ["human-scale", "alternative"]
-        case .moment: return ["with-place", "together"]
+        case .moment: return ["with-place"]
         case .matchCut, .clones: return []
         }
     }
@@ -71,7 +72,7 @@ enum OneTakePart: String, CaseIterable, Codable, Identifiable {
         case .inView:
             return "In the view: stop on a third line, small against it. Look out, take a few steps, sit, point something out."
         case .moment:
-            return "Your moment: walk back about halfway. Touch the water, lie back in the grass, a spin together."
+            return "Your moment: walk back about halfway. Touch the water, lie back in the grass, take in the view."
         case .matchCut:
             return "\(move.title): while the light's on, walk slowly towards the phone from further back and stop when it "
                 + "goes off. Then 5 flashes, and do your move once."
@@ -96,6 +97,15 @@ enum OneTakePart: String, CaseIterable, Codable, Identifiable {
 
     /// The shots a ONE TAKE can film.
     static let shots: [ShotType] = [.wide, .walkaway, .moment, .matchCut, .clone]
+
+    /// Whether a ONE TAKE can film what a row still needs: one of its shots and, for those with roles, a role one of
+    /// its parts fills (1.25.1). MOMENT with only Together left doesn't count, as that's filmed on its own, upright.
+    static func canFill(_ row: MissingCoverage) -> Bool {
+        guard shots.contains(row.slot.shot) else { return false }
+        guard !row.roles.isEmpty else { return true }
+        let fillable = Set(allCases.filter { $0.shot == row.slot.shot }.flatMap { $0.roleOrder })
+        return row.roles.contains { fillable.contains($0.id) }
+    }
 
     /// Where each part you reached is in the clip: from where it began to where the next one began, where you set off
     /// back, or where the take stopped. `starts` has one entry per part reached, the first at 0.

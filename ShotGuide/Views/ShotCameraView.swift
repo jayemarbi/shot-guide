@@ -848,7 +848,8 @@ struct ShotCameraView: View {
                     .symbolEffect(.pulse)
                 Text(landscape ? "Turn the phone to landscape" : "Turn the phone to portrait")
                     .font(.title3.weight(.bold))
-                Text(landscape ? "This shot is for the wide, cinematic edits." : "This one is for full-screen reels.")
+                Text(landscape ? "This one's a big view, filmed wide to take in the whole scene."
+                               : "This one's filmed upright, the way reels are watched.")
                     .font(.subheadline)
                     .foregroundStyle(Color.white.opacity(0.85))
             }

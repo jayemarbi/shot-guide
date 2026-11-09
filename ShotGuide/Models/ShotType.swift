@@ -13,20 +13,22 @@ enum LensChoice: String, Codable, CaseIterable {
     case front
 }
 
-/// Which way to hold the phone for a shot.
+/// Which way to hold the phone for a shot. Every reel is watched upright, so most shots are filmed that way, framed as
+/// they'll be seen rather than cropped from a wide clip in the edit (1.25.1).
 enum Filming {
-    /// The place is the star: filmed wide, for the letterboxed, cinematic edits.
+    /// The big views, where the place is the star: filmed wide, so the grand scenes keep their width for the cinematic
+    /// edits. An upright slice of a 4K landscape clip is still sharp enough for a full-screen reel.
     case landscape
-    /// You talking or up close: filmed tall, for full-screen reels.
+    /// Everything else: you, people and things up close, and the moving shots, filmed as the reels play.
     case portrait
-    /// Whichever suits.
+    /// Set by each version or role instead: REVEAL's versions and B-ROLL's roles go different ways (1.25.1).
     case either
 
     var title: String {
         switch self {
         case .landscape: return "Landscape"
         case .portrait: return "Portrait"
-        case .either: return "Either way"
+        case .either: return "Portrait or landscape"
         }
     }
 
@@ -353,17 +355,18 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         tier != .extra
     }
 
-    /// Which way to hold the phone. The big views go sideways, for the cinematic edits; you talking or up close
-    /// stays upright, for full-screen reels.
+    /// Which way to hold the phone (1.25.1). The big views stay landscape, so the grand scenes keep their width;
+    /// everything else is filmed upright, as the reels are watched. REVEAL and B-ROLL say for each version or role, and
+    /// a few versions and roles go the other way from their shot (WIDE's vertical hero, MATCH CUT's snap). The camera
+    /// records whichever way the phone is actually held.
     var filming: Filming {
         switch self {
-        case .wide, .tele, .walkaway, .moment, .silhouette, .timelapse, .reflection, .matchCut, .onTheWay, .wildlife, .home,
-             .bRoll, .oneTake:
+        case .wide, .tele, .walkaway, .silhouette, .timelapse, .reflection, .matchCut, .onTheWay, .wildlife, .oneTake:
             return .landscape
-        case .talk, .reaction, .pov, .food, .follow, .whip:
-            return .portrait
-        default:
+        case .reveal, .bRoll:
             return .either
+        default:
+            return .portrait
         }
     }
 
@@ -558,14 +561,14 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 return "Tiny and side-on, on a ridge, a dune or the shoreline 30 to 50 m away, against the sky."
             }
         case .clone:
-            return "Anywhere in the frame, a different spot each time, all about the same distance from the phone. Never "
-                + "where you've just been, so you don't overlap yourself."
+            return "A different spot each time, spread left and right and nearer and further away, as only two or three of "
+                + "you fit side by side upright. Keep each spot clear of the ones before, so you don't overlap yourself."
         case .oneTake:
             return "You start behind the phone, out of shot. The parts take you out into the view and back again."
         case .silhouette:
             return "Low in the frame against the brightest part of the sky, side-on, a little apart so there's sky between you."
         case .dance:
-            return "Full body in the middle third of the frame, with space above your head and the view big behind you."
+            return "Full body in the middle of the upright frame, with space above your head and the view big behind you."
         case .home:
             return firstHalf
                 ? "In the middle of the frame, doing the ordinary thing: zipping your bag, at the window, sitting at the gate."
@@ -669,8 +672,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .oneTake:
             return ["Your remote moves you on to the next part whenever you're ready.",
                     "Leave MATCH CUT or CLONE out when the spot doesn't suit them, and film them on their own further along.",
-                    "A second ONE TAKE from a new spot fills the second roles: WIDE · Another angle, WALKAWAY · New spot "
-                        + "or action and MOMENT · Together."]
+                    "A second ONE TAKE from a new spot fills the second roles: WIDE · Another angle and WALKAWAY · New "
+                        + "spot or action.",
+                    "Your moment counts as MOMENT · With the place. Film MOMENT · Together on its own, upright."]
         case .stay:
             return ["Film it the moment you arrive, before you unpack, with the curtains open and the lights on.",
                     "Walk in slowly and let your first reaction happen.",
@@ -717,7 +721,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                         GuideStep(start: 2, end: 7, text: "Zooming in. Keep the focal point centred."),
                         GuideStep(start: 7, end: 10, text: "Hold on the focal point.")
                     ],
-                    variantName: variantName)
+                    variantName: variantName,
+                    filming: .landscape)
             }
             if variantIndex == 2 {
                 return ShotPlan(
@@ -731,7 +736,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                         GuideStep(start: 2, end: 8, text: "Tilt up slowly and evenly."),
                         GuideStep(start: 8, end: 10, text: "Hold on the view.")
                     ],
-                    variantName: variantName)
+                    variantName: variantName,
+                    filming: .portrait)
             }
             return ShotPlan(
                 shot: self, take: take, group: .inHand,
@@ -743,7 +749,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     GuideStep(start: 2, end: 8, text: "Walk or rise slowly until it opens up."),
                     GuideStep(start: 8, end: 11, text: "Hold on the view.")
                 ],
-                variantName: variantName)
+                variantName: variantName,
+                filming: .portrait)
 
         case .timelapse:
             return ShotPlan(
@@ -1187,7 +1194,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Frame it and hold."),
                         GuideStep(start: 1, end: 10, text: "Hold still and let them move through.")
-                    ])
+                    ],
+                    filming: .portrait)
             case "movement":
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
@@ -1197,7 +1205,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Frame it and hold."),
                         GuideStep(start: 1, end: 10, text: "Hold still. Let it move through the frame.")
-                    ])
+                    ],
+                    filming: .landscape)
             case "local":
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
@@ -1207,7 +1216,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Frame it with the subject in the middle."),
                         GuideStep(start: 1, end: 8, text: "Hold still, or drift very slowly.")
-                    ])
+                    ],
+                    filming: .portrait)
             case "lens-angle":
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
@@ -1217,7 +1227,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Frame it and hold."),
                         GuideStep(start: 1, end: 10, text: "Hold very still. Long lenses show every shake.")
-                    ])
+                    ],
+                    filming: .landscape)
             case "transition":
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
@@ -1228,7 +1239,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Get ready."),
                         GuideStep(start: 1, end: 6, text: "Let something pass close to the lens, or pan away.")
-                    ])
+                    ],
+                    filming: .portrait)
             case "nature":
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
@@ -1238,7 +1250,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Frame it and hold."),
                         GuideStep(start: 1, end: 10, text: "Hold still, or drift very slowly.")
-                    ])
+                    ],
+                    filming: .portrait)
             case "into-light":
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
@@ -1249,7 +1262,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Frame it and hold."),
                         GuideStep(start: 1, end: 8, text: "Hold still, or drift slowly past the sun.")
-                    ])
+                    ],
+                    filming: .portrait)
             default:
                 return ShotPlan(
                     shot: self, take: take, group: .inHand,
@@ -1259,7 +1273,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                     steps: [
                         GuideStep(start: 0, end: 1, text: "Frame it and hold."),
                         GuideStep(start: 1, end: 12, text: "Hold still. Let the light and weather do the work.")
-                    ])
+                    ],
+                    filming: .landscape)
             }
 
         case .stay:
@@ -1381,9 +1396,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 shot: self, take: take, group: .inShot,
                 lens: .wide, fps: 60, stabilisation: .off,
                 autoStop: nil, manualLength: 60, countdown: 10,
-                before: "Tripod, framed wide with the view big and you full-body in it. Put your AirPods in: the song "
-                    + "starts during the countdown, so your part lands as recording starts. At each new spot, carry on from "
-                    + "10 seconds before where you stopped, or dance it from the top.",
+                before: "Tripod, phone upright, set back far enough for all of you with the view behind. Put your AirPods "
+                    + "in: the song starts during the countdown, so your part lands as recording starts. At each new spot, "
+                    + "carry on from 10 seconds before where you stopped, or dance it from the top.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "In position as your part of the song comes in."),
                     GuideStep(start: 2, end: nil,
