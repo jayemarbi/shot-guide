@@ -146,6 +146,23 @@ final class CameraController: NSObject, ObservableObject {
     /// MATCH CUT: looks for you in the preview frames (1.24). Used on dataQueue.
     private var personFinder: PersonFinder?
 
+    override init() {
+        super.init()
+        // A Log take ends properly when the camera's taken away (a call, the app put away), as the phone's own recorder
+        // does by itself (1.25).
+        for name in [AVCaptureSession.wasInterruptedNotification, AVCaptureSession.runtimeErrorNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(cameraTakenAway), name: name, object: session)
+        }
+    }
+
+    @objc private func cameraTakenAway() {
+        DispatchQueue.main.async {
+            if self.phase == .recording, self.activeLog {
+                self.stopRecording()
+            }
+        }
+    }
+
     // MARK: Permissions
 
     static func requestAccess(completion: @escaping (Bool) -> Void) {
