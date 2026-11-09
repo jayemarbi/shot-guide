@@ -352,11 +352,30 @@ struct ShotCameraView: View {
 
             VStack(spacing: 0) {
                 topBar
+                if showsPrompt && level.hold == .upright {
+                    // Held upright: the prompt sits just under the bar at the top.
+                    promptStrip
+                        .padding(.top, 10)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .allowsHitTesting(false)
+                }
                 Spacer()
+                if showsPrompt && level.hold == .upsideDown {
+                    // Upside down, the top of the frame is by the record button: the prompt sits just past it.
+                    promptStrip
+                        .rotationEffect(.degrees(180))
+                        .padding(.bottom, 10)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .allowsHitTesting(false)
+                }
                 bottomControls
             }
 
             facingLayer
+
+            promptLayer
 
             if showBriefing && !isBusy && !permissionDenied {
                 briefingCard
@@ -563,9 +582,8 @@ struct ShotCameraView: View {
             } else if !camera.rolling {
                 // Asked to record, but the camera hasn't started yet: just after it opens, that can take a moment.
                 notice("Starting…")
-            } else if !plan.isInShot {
-                promptCard
             }
+            // A shot you're holding gets its prompt along the top of the frame instead (promptLayer), out of the middle.
         } else if camera.phase == .finishing {
             ProgressView("Saving…")
                 .tint(.white)
@@ -690,35 +708,71 @@ struct ShotCameraView: View {
             .padding(.horizontal, 24)
     }
 
+    /// Whether a take's prompt is showing: while you film a shot you're holding (not one you're in, or a time-lapse,
+    /// which has its own clock in the middle).
+    private var showsPrompt: Bool {
+        camera.phase == .recording && camera.rolling && !plan.isInShot && plan.timelapseInterval == nil
+    }
+
+    /// The step to do now while you film a shot you're holding sideways (1.23): small, along the top of the frame as
+    /// you see it, turned to face you and out of the middle. Held upright or upside down, it sits by the bars of
+    /// buttons instead (see `screen`).
+    private var promptLayer: some View {
+        GeometryReader { geometry in
+            let hold = level.hold
+            VStack(spacing: 0) {
+                if showsPrompt && hold.isSideways {
+                    promptStrip
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 16)
+            .padding(.horizontal, 16)
+            .frame(width: geometry.size.height, height: geometry.size.width, alignment: .top)
+            .rotationEffect(.degrees(hold.screenRotation))
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// The clock, what to do now in a few words, a bar for this step, and what's next and when, like "At 0:22 · Ease
+    /// to a stop". The times match the walkthrough's, including for a length you've changed.
     @ViewBuilder
-    private var promptCard: some View {
+    private var promptStrip: some View {
         let steps = displaySteps
         let now = camera.elapsed
         if let index = steps.lastIndex(where: { now >= $0.start }) {
             let step = steps[index]
             let next: GuideStep? = index + 1 < steps.count ? steps[index + 1] : nil
-            VStack(spacing: 10) {
-                Text(step.text)
-                    .font(.system(size: 30, weight: .bold))
-                    .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                    Text(timing.stopsByItself ? "\(clockString(now)) / \(clockString(stopTime))" : clockString(now))
+                        .font(.footnote.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(Color.white.opacity(0.85))
+                }
+                Text(step.headline)
+                    .font(.system(size: 18, weight: .semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let end = step.end {
-                    Text("\(Int(max(0, end - now).rounded(.up)))")
-                        .font(.system(size: 24, weight: .semibold).monospacedDigit())
                     ProgressView(value: min(1, max(0, (now - step.start) / max(end - step.start, 0.1))))
                         .tint(.orange)
-                        .frame(maxWidth: 220)
                 }
                 if let next {
-                    Text("Next: \(next.text)")
+                    Text("At \(clockString(next.start)) · \(next.headline)")
                         .font(.footnote)
                         .foregroundStyle(Color.white.opacity(0.75))
+                        .lineLimit(1)
                 }
             }
             .foregroundStyle(Color.white)
-            .padding(20)
-            .frame(maxWidth: .infinity)
-            .background(Color.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 18))
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: 300, alignment: .leading)
+            .background(Color.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
         }
     }
 

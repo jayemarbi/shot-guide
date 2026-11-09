@@ -103,6 +103,22 @@ struct GuideStep: Hashable {
     static func number(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
+
+    /// The first few words, like "Walk smoothly towards it", for the prompt while you film (1.23): the text up to its
+    /// first colon, full stop or semicolon.
+    var headline: String {
+        var cut = text.endIndex
+        for mark in [": ", ". ", "; "] {
+            if let range = text.range(of: mark), range.lowerBound < cut {
+                cut = range.lowerBound
+            }
+        }
+        var words = String(text[..<cut])
+        if words.hasSuffix(".") {
+            words.removeLast()
+        }
+        return words.isEmpty ? text : words
+    }
 }
 
 /// A zoom the app performs itself, in the zoom values shown on screen (like 0.5x to 2x).
@@ -193,18 +209,64 @@ struct ShotPlan {
         ShotTiming(countdown: isInShot ? countdown : 0, stopsByItself: autoStop != nil, length: autoStop ?? manualLength)
     }
 
-    /// The timeline fitted to how the take ends: the last step runs to the chosen length,
-    /// or stays open when you stop it yourself. Steps after a shorter length are dropped.
+    /// The steps that start and stop a take, like getting going and easing to a stop, keep their length when it
+    /// changes; the longer ones are the action, and stretch or shrink (1.23).
+    static let shortStep: Double = 3
+
+    /// The timeline fitted to how the take ends. With no end (you stop it yourself) the last step stays open.
+    /// At the length the steps were written for, they're as written. For a shot you're holding, at any other length
+    /// the short steps (3 seconds or less) keep their length and the longer ones, the main action, share the rest in
+    /// proportion, so a longer take means more of the action rather than a longer stop (1.23). When every step is
+    /// short, or the take is shorter than the short steps together, they all change in proportion. Times are whole
+    /// seconds, and the last step ends exactly at the end. Shots you're in keep their steps where they were written,
+    /// the last one running to the end, since their cues (like CLONE's flashes) are set in seconds.
     func timeline(endingAt end: Double?) -> [GuideStep] {
         guard let end else {
             guard let last = steps.last else { return steps }
             return Array(steps.dropLast()) + [GuideStep(start: last.start, end: nil, text: last.text)]
         }
-        var kept = steps.filter { $0.start < end }
-        if let last = kept.last {
-            kept[kept.count - 1] = GuideStep(start: last.start, end: end, text: last.text)
+        guard !isInShot, flashCues.isEmpty else {
+            var kept = steps.filter { $0.start < end }
+            if let last = kept.last {
+                kept[kept.count - 1] = GuideStep(start: last.start, end: end, text: last.text)
+            }
+            return kept
         }
-        return kept
+        guard let first = steps.first, end > first.start else { return steps }
+        // Each step's length as written: to its end, the next step's start, or the end of the take.
+        let lengths: [Double] = steps.indices.map { index in
+            let step = steps[index]
+            let stop = step.end ?? (index + 1 < steps.count ? steps[index + 1].start : end)
+            return max(0, stop - step.start)
+        }
+        let written = lengths.reduce(0, +)
+        if abs(first.start + written - end) < 0.01 {
+            return steps.indices.map { index in
+                GuideStep(start: steps[index].start, end: steps[index].start + lengths[index], text: steps[index].text)
+            }
+        }
+        let room = end - first.start
+        let fixed = lengths.filter { $0 <= Self.shortStep }.reduce(0, +)
+        let stretchy = written - fixed
+        let fitted: [Double]
+        if stretchy > 0 && room > fixed {
+            fitted = lengths.map { $0 <= Self.shortStep ? $0 : $0 * (room - fixed) / stretchy }
+        } else if written > 0 {
+            fitted = lengths.map { $0 * room / written }
+        } else {
+            fitted = lengths.map { _ in room / Double(lengths.count) }
+        }
+        var timeline: [GuideStep] = []
+        var clock = first.start
+        for index in steps.indices {
+            let start = clock.rounded()
+            clock += fitted[index]
+            let stop = index == steps.count - 1 ? end : min(clock.rounded(), end)
+            if stop > start {
+                timeline.append(GuideStep(start: start, end: stop, text: steps[index].text))
+            }
+        }
+        return timeline.isEmpty ? [GuideStep(start: first.start, end: end, text: first.text)] : timeline
     }
 }
 
