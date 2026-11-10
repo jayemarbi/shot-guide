@@ -209,15 +209,35 @@ extension Trip {
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
-    /// Each spot you filmed at on a day and when you got there, from your clips: "7:40 am  Lower Falls · 12 clips".
+    /// Each spot you filmed at on a day and when you got there, from your clips: "7:40 am  Lower Falls · 12 clips". A spot
+    /// with only clips added from another day comes after the rest, with that day's date: "4 Nov 10:41 pm  Scene 2" (1.27.1).
     func timeline(day number: Int) -> [String] {
         let formatter = timeFormatter(onDay: number)
-        return scenes(onDay: number).compactMap { scene -> String? in
-            guard let first = scene.clips.first else { return nil }
+        let zone = timeZone(onDay: number)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let dateFormatter = DateFormatter()
+        dateFormatter.timeZone = zone
+        dateFormatter.setLocalizedDateFormatFromTemplate("dMMM")
+        let today = day(number).startedAt
+        var onTheDay: [(at: Date, line: String)] = []
+        var fromOtherDays: [(at: Date, line: String)] = []
+        for scene in scenes(onDay: number) {
+            // When you got there that day, or when its first clip was filmed if they were all added from another day.
+            let first = scene.clips.first { calendar.isDate($0.recordedAt, inSameDayAs: today) }
+            guard let arrived = first ?? scene.clips.first else { continue }
             let count = scene.clips.count
             let clipCount = count == 1 ? "1 clip" : "\(count) clips"
-            return "\(formatter.string(from: first.recordedAt))  \(scene.name) · \(clipCount)"
+            let time = formatter.string(from: arrived.recordedAt)
+            if first != nil {
+                onTheDay.append((at: arrived.recordedAt, line: "\(time)  \(scene.name) · \(clipCount)"))
+            } else {
+                let date = dateFormatter.string(from: arrived.recordedAt)
+                fromOtherDays.append((at: arrived.recordedAt, line: "\(date) \(time)  \(scene.name) · \(clipCount)"))
+            }
         }
+        let ordered = onTheDay.sorted { $0.at < $1.at } + fromOtherDays.sorted { $0.at < $1.at }
+        return ordered.map { $0.line }
     }
 
     /// facts.txt: each place's facts, what you spent there and its links, then each day there with the sun's times and

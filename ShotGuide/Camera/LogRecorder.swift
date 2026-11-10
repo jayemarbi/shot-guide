@@ -47,6 +47,15 @@ final class LogRecorder: NSObject {
     private var stopCompletion: ((URL?, String?) -> Void)?
     /// The mic's sound format, seen as its sound arrives, for when the camera has no suggestion.
     private var audioFormat: CMAudioFormatDescription?
+    /// Sound waiting to go into the movie, oldest first (1.27.1). Steadying the picture holds frames back by up to a
+    /// second and a half, so a take's first frame was filmed before recording began: the last few seconds of sound are
+    /// kept all the time, so the clip's sound starts with its first frame. Until 1.27.1 it started a second or so late.
+    /// Kept across takes, so `clear` leaves it.
+    private var pendingAudio: [CMSampleBuffer] = []
+    /// How much sound is kept from before a take.
+    private static let audioKept = CMTime(seconds: 3, preferredTimescale: 600)
+    /// The most sound that waits for a writer that's fallen behind, about 12 seconds.
+    private static let audioWaitingLimit = 600
     /// Counts takes, so the check on a take that never got going can't catch a later one.
     private var takeNumber = 0
 
@@ -118,6 +127,8 @@ final class LogRecorder: NSObject {
     private func finish() {
         guard let writer, let completion = stopCompletion else { return }
         stopCompletion = nil
+        // Any sound still waiting goes in first.
+        drainAudio()
         if lastVideoEnd.isValid {
             // The sound ends with the last frame, so the clip doesn't run on with no picture.
             writer.endSession(atSourceTime: lastVideoEnd)
@@ -211,6 +222,8 @@ final class LogRecorder: NSObject {
                 let callback = onStarted
                 DispatchQueue.main.async { callback?(lag) }
             }
+            // The sound from the first frame on, kept from before the take began, and any that's waiting.
+            drainAudio()
         } else if writer.status == .failed {
             fail(Self.describe(writer.error))
         }
@@ -220,11 +233,43 @@ final class LogRecorder: NSObject {
         if let format = CMSampleBufferGetFormatDescription(sample) {
             audioFormat = format
         }
-        guard started, !failed, let input = audioInput, sessionStart.isValid else { return }
-        // Sound from before the first frame is left out.
-        guard CMTimeCompare(CMSampleBufferGetPresentationTimeStamp(sample), sessionStart) >= 0,
-              input.isReadyForMoreMediaData else { return }
-        input.append(sample)
+        pendingAudio.append(sample)
+        if started, !failed, audioInput != nil, sessionStart.isValid {
+            drainAudio()
+        } else {
+            // Not recording: only the last few seconds are kept, for the start of the next take.
+            forgetOldAudio()
+        }
+    }
+
+    /// Lets go of the sound from more than a few seconds ago.
+    private func forgetOldAudio() {
+        guard let newest = pendingAudio.last else { return }
+        let cutoff = CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(newest), Self.audioKept)
+        let keepFrom = pendingAudio.firstIndex { CMTimeCompare(CMSampleBufferGetPresentationTimeStamp($0), cutoff) >= 0 }
+        if let keepFrom, keepFrom > 0 {
+            pendingAudio.removeFirst(keepFrom)
+        }
+    }
+
+    /// Adds the waiting sound to the movie, from the take's first frame on, as fast as the writer takes it. Sound from
+    /// before the first frame is left out.
+    private func drainAudio() {
+        guard let input = audioInput, sessionStart.isValid else { return }
+        var used = 0
+        for sample in pendingAudio {
+            if CMTimeCompare(CMSampleBufferGetPresentationTimeStamp(sample), sessionStart) >= 0 {
+                guard input.isReadyForMoreMediaData, input.append(sample) else { break }
+            }
+            used += 1
+        }
+        if used > 0 {
+            pendingAudio.removeFirst(used)
+        }
+        // A writer that's stopped taking sound mustn't let it pile up.
+        if pendingAudio.count > Self.audioWaitingLimit {
+            pendingAudio.removeFirst(pendingAudio.count - Self.audioWaitingLimit)
+        }
     }
 
     /// Opens the file with the first frame, now its size is known.
@@ -303,7 +348,8 @@ final class LogRecorder: NSObject {
         return max(Int(60_000_000 * size * speed), 20_000_000)
     }
 
-    /// AAC like the phone's own recorder: the camera's suggestion, or else made to match the mic.
+    /// The camera's suggestion for the sound (uncompressed, 16-bit stereo on an iPhone 16 Pro), or else AAC made to match
+    /// the mic.
     private func audioSettings(_ take: Take, writer: AVAssetWriter) -> [String: Any]? {
         if let suggested = take.audioSettings, !suggested.isEmpty,
            writer.canApply(outputSettings: suggested, forMediaType: .audio) {

@@ -9,6 +9,11 @@ import Vision
 /// Since 1.25 it finds you first, then cuts you out from a close-up of that part of the full-size frame. Apple's cutout
 /// works on a small copy of the picture, so from the whole frame anyone a few metres away came back as nothing: on the
 /// test day, every wide shot's mask was empty.
+///
+/// Since 1.27.1 the cutout also keeps track of you once you're found. The person finder can miss someone small and
+/// still (on the 1.27 test, standing with arms crossed 7 m away, for 25 seconds), and after a second it went back to
+/// the whole frame, where someone that small is lost. Now wherever the cutout still finds you counts as seeing you,
+/// and the close-up follows you there.
 enum MaskMaker {
     enum MaskError: Error {
         case noVideo
@@ -108,6 +113,8 @@ enum MaskMaker {
             guard let pool = adaptor.pixelBufferPool else { throw MaskError.cannotWrite }
 
             let appended: Bool = autoreleasepool {
+                let thisFrame = frameIndex
+                var finderSawYou = false
                 var source = frame
                 if let look, let graded = Self.graded(frame, look: look, context: context, pool: &lookPool) {
                     source = graded
@@ -126,6 +133,7 @@ enum MaskMaker {
                     if let target = Window.around(people) {
                         window = window.following(target)
                         lastSeen = frameIndex
+                        finderSawYou = true
                     } else if frameIndex - lastSeen > holdFrames {
                         // Gone for a second: back to the whole frame, in case you're there but not spotted.
                         window = .whole
@@ -133,9 +141,11 @@ enum MaskMaker {
                 }
                 frameIndex += 1
 
-                // That part of the frame, at the mask's size.
-                let area = CGRect(x: window.x * fullSize.width, y: window.y * fullSize.height,
-                                  width: window.size * fullSize.width, height: window.size * fullSize.height)
+                // That part of the frame, at the mask's size. `used` stays this frame's part, as following you moves
+                // `window` on for the next one.
+                let used = window
+                let area = CGRect(x: used.x * fullSize.width, y: used.y * fullSize.height,
+                                  width: used.size * fullSize.width, height: used.size * fullSize.height)
                 let zoom = CGFloat(width) / max(area.width, 1)
                 let part = full.cropped(to: area)
                     .transformed(by: CGAffineTransform(translationX: -area.minX, y: -area.minY))
@@ -145,11 +155,20 @@ enum MaskMaker {
                 let mask = CIImage(cvPixelBuffer: maskBuffer)
                 guard mask.extent.width > 0, mask.extent.height > 0 else { return false }
 
+                // Where the cutout found you: that counts as seeing you, and when the finder missed you, the close-up
+                // moves to follow you for the next frame (1.27.1).
+                if let box = Self.personBox(in: maskBuffer, window: used) {
+                    lastSeen = thisFrame
+                    if !finderSawYou, let target = Window.around([box]) {
+                        window = window.following(target)
+                    }
+                }
+
                 // Back where that part sits in the frame, black everywhere else.
                 let placed = mask
-                    .transformed(by: CGAffineTransform(scaleX: window.size * CGFloat(width) / mask.extent.width,
-                                                       y: window.size * CGFloat(height) / mask.extent.height))
-                    .transformed(by: CGAffineTransform(translationX: window.x * CGFloat(width), y: window.y * CGFloat(height)))
+                    .transformed(by: CGAffineTransform(scaleX: used.size * CGFloat(width) / mask.extent.width,
+                                                       y: used.size * CGFloat(height) / mask.extent.height))
+                    .transformed(by: CGAffineTransform(translationX: used.x * CGFloat(width), y: used.y * CGFloat(height)))
                 let fitted = placed.composited(over: black)
                     .cropped(to: bounds)
                     .applyingFilter("CIColorMatrix", parameters: [
@@ -222,6 +241,55 @@ enum MaskMaker {
                                size: size + (target.size - size) * 0.3).insideFrame()
             return eased.contains(target) ? eased : target
         }
+    }
+
+    /// The box around you in a cutout of the part of the frame `window` covers, in the frame's terms (fractions from the
+    /// bottom left, like the person finder's), or nil when there's hardly anything there. Every fourth pixel across and
+    /// down is plenty to keep track (1.27.1).
+    static func personBox(in mask: CVPixelBuffer, window: Window) -> CGRect? {
+        CVPixelBufferLockBaseAddress(mask, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(mask, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(mask) else { return nil }
+        let width = CVPixelBufferGetWidth(mask)
+        let height = CVPixelBufferGetHeight(mask)
+        let rowBytes = CVPixelBufferGetBytesPerRow(mask)
+        guard width > 0, height > 0, rowBytes >= width else { return nil }
+        let pixels = base.assumingMemoryBound(to: UInt8.self)
+        let step = 4
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        var found = 0
+        var looked = 0
+        var y = 0
+        while y < height {
+            let row = pixels + y * rowBytes
+            var x = 0
+            while x < width {
+                looked += 1
+                if row[x] > 127 {
+                    found += 1
+                    minX = min(minX, x)
+                    maxX = max(maxX, x)
+                    minY = min(minY, y)
+                    maxY = max(maxY, y)
+                }
+                x += step
+            }
+            y += step
+        }
+        // A person, not a speck: at least a five-hundredth of the part.
+        guard found >= 8, Double(found) / Double(max(looked, 1)) >= 0.002 else { return nil }
+        let across = CGFloat(width)
+        let down = CGFloat(height)
+        let left = window.x + CGFloat(minX) / across * window.size
+        let right = window.x + CGFloat(min(maxX + step, width)) / across * window.size
+        // The cutout's rows run down from the top; the frame's fractions run up from the bottom.
+        let bottom = window.y + (1 - CGFloat(min(maxY + step, height)) / down) * window.size
+        let top = window.y + (1 - CGFloat(minY) / down) * window.size
+        guard right > left, top > bottom else { return nil }
+        return CGRect(x: left, y: bottom, width: right - left, height: top - bottom)
     }
 
     /// A frame put through a look (raw values in, no colour management), for clips filmed in Apple Log.
