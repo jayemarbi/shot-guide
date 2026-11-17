@@ -1,0 +1,77 @@
+commit: 13f570592865523cee44f1268e25a6dc5fe6da94
+Xcode 26.3
+Build version 17C529
+
+total 15720
+drwxr-xr-x  9 runner  staff      288 Nov 17 13:13 .
+drwxr-xr-x  3 runner  staff       96 Nov 17 13:13 ..
+-rw-r--r--  1 runner  staff     5348 Nov 17 13:13 AppIcon60x60@2x.png
+-rw-r--r--  1 runner  staff     6670 Nov 17 13:13 AppIcon76x76@2x~ipad.png
+-rw-r--r--  1 runner  staff    34328 Nov 17 13:13 Assets.car
+-rw-r--r--  1 runner  staff     1748 Nov 17 13:13 Info.plist
+-rw-r--r--  1 runner  staff        8 Nov 17 13:13 PkgInfo
+-rwxr-xr-x  1 runner  staff  7015640 Nov 17 13:13 ShotGuide
+-rw-r--r--  1 runner  staff   970411 Nov 17 13:13 Standard.cube
+
+Non-fat file: Payload/ShotGuide.app/ShotGuide is architecture: arm64
+
+{
+  "BuildMachineOSBuild" => "24G830"
+  "CFBundleDevelopmentRegion" => "en"
+  "CFBundleDisplayName" => "Shot Guide"
+  "CFBundleExecutable" => "ShotGuide"
+  "CFBundleIcons" => {
+    "CFBundlePrimaryIcon" => {
+      "CFBundleIconFiles" => [
+        0 => "AppIcon60x60"
+      ]
+      "CFBundleIconName" => "AppIcon"
+    }
+  }
+  "CFBundleIcons~ipad" => {
+    "CFBundlePrimaryIcon" => {
+      "CFBundleIconFiles" => [
+        0 => "AppIcon60x60"
+        1 => "AppIcon76x76"
+      ]
+    }
+  }
+  "CFBundleIdentifier" => "com.jodyseescoolstuff.shotguide"
+  "CFBundleInfoDictionaryVersion" => "6.0"
+  "CFBundleName" => "ShotGuide"
+  "CFBundlePackageType" => "APPL"
+  "CFBundleShortVersionString" => "1.28"
+  "CFBundleSupportedPlatforms" => [
+    0 => "iPhoneOS"
+  ]
+  "CFBundleVersion" => "34"
+  "DTCompiler" => "com.apple.compilers.llvm.clang.1_0"
+  "DTPlatformBuild" => "23C57"
+  "DTPlatformName" => "iphoneos"
+  "DTPlatformVersion" => "26.2"
+  "DTSDKBuild" => "23C57"
+  "DTSDKName" => "iphoneos26.2"
+  "DTXcode" => "2630"
+  "DTXcodeBuild" => "17C529"
+  "ITSAppUsesNonExemptEncryption" => 0
+  "LSSupportsOpeningDocumentsInPlace" => 1
+  "MinimumOSVersion" => "18.0"
+  "NSCameraUsageDescription" => "Shot Guide films each shot with the camera."
+  "NSLocationWhenInUseUsageDescription" => "Shot Guide saves where each trip and clip was filmed."
+  "NSMicrophoneUsageDescription" => "Shot Guide records the sound with your clips."
+  "NSPhotoLibraryAddUsageDescription" => "Shot Guide saves graded copies of your clips to Photos when you ask it to."
+  "NSSpeechRecognitionUsageDescription" => "Shot Guide writes down what you say in talking shots, on your phone, so edits can have captions."
+  "UIDeviceFamily" => [
+    0 => 1
+  ]
+  "UIFileSharingEnabled" => 1
+  "UILaunchScreen" => {
+  }
+  "UIRequiredDeviceCapabilities" => [
+    0 => "arm64"
+  ]
+  "UIRequiresFullScreen" => 1
+  "UISupportedInterfaceOrientations" => [
+    0 => "UIInterfaceOrientationPortrait"
+  ]
+}
