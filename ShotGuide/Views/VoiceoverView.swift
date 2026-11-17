@@ -2,8 +2,9 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// Records VOICEOVER: your voice only, for narration. Shows what to talk about, which mic is
-/// recording and how loud you are, then plays it back so you can tag or redo it.
+/// Records VOICEOVER: your voice only, for narration. Since 1.28 it's filmed at home, from a script written from your
+/// place facts, which scrolls as you read. Shows which mic is recording and how loud you are, then plays it back so you
+/// can tag or redo it.
 struct VoiceoverView: View {
     let tripID: UUID
     let day: Int
@@ -18,6 +19,7 @@ struct VoiceoverView: View {
     @State private var startedAt = Date()
     @State private var reviewClip: Clip? = nil
     @State private var message: String? = nil
+    @State private var editingScript = false
 
     private var plan: ShotPlan {
         ShotType.voiceover.plan(take: take, inShot: false, variant: 0)
@@ -34,20 +36,12 @@ struct VoiceoverView: View {
                 Text(plan.before)
                     .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Talk about")
-                        .font(.headline)
-                    ForEach(plan.steps, id: \.self) { step in
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(step.rangeLabel)
-                                .font(.subheadline.monospacedDigit().weight(.semibold))
-                                .foregroundStyle(Color.orange)
-                                .frame(width: 72, alignment: .leading)
-                            Text(step.text)
-                                .fontWeight(currentStep == step ? .bold : .regular)
-                        }
-                        .opacity(currentStep == nil || currentStep == step ? 1 : 0.45)
-                    }
+                let script = store.trip(id: tripID)?.script(for: .voiceover)
+                TeleprompterPanel(script: script, elapsed: recorder.isRecording ? recorder.elapsed : nil, startsAt: 0) {
+                    editingScript = true
+                }
+                if script == nil {
+                    talkAbout
                 }
 
                 Spacer()
@@ -122,10 +116,32 @@ struct VoiceoverView: View {
                 message = "Microphone access is off for Shot Guide. Turn it on in Settings."
             }
         }
+        .sheet(isPresented: $editingScript) {
+            ScriptSheet(tripID: tripID, shot: .voiceover)
+        }
         .sheet(item: $reviewClip, onDismiss: {
             take = store.nextTake(tripID: tripID, shot: .voiceover, day: day)
         }) { clip in
             ReviewView(tripID: tripID, clipID: clip.id, autoplay: true, preselectSuggestions: false, title: "VOICEOVER · take \(clip.take)")
+        }
+    }
+
+    /// Without a script: what to talk about, step by step.
+    private var talkAbout: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Or talk about")
+                .font(.headline)
+            ForEach(plan.steps, id: \.self) { step in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(step.rangeLabel)
+                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(Color.orange)
+                        .frame(width: 72, alignment: .leading)
+                    Text(step.text)
+                        .fontWeight(currentStep == step ? .bold : .regular)
+                }
+                .opacity(currentStep == nil || currentStep == step ? 1 : 0.45)
+            }
         }
     }
 

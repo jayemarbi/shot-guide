@@ -98,15 +98,6 @@ enum OneTakePart: String, CaseIterable, Codable, Identifiable {
     /// The shots a ONE TAKE can film.
     static let shots: [ShotType] = [.wide, .walkaway, .moment, .matchCut, .clone]
 
-    /// Whether a ONE TAKE can film what a row still needs: one of its shots and, for those with roles, a role one of
-    /// its parts fills (1.25.1). MOMENT with only Together left doesn't count, as that's filmed on its own, upright.
-    static func canFill(_ row: MissingCoverage) -> Bool {
-        guard shots.contains(row.slot.shot) else { return false }
-        guard !row.roles.isEmpty else { return true }
-        let fillable = Set(allCases.filter { $0.shot == row.slot.shot }.flatMap { $0.roleOrder })
-        return row.roles.contains { fillable.contains($0.id) }
-    }
-
     /// Where each part you reached is in the clip: from where it began to where the next one began, where you set off
     /// back, or where the take stopped. `starts` has one entry per part reached, the first at 0.
     static func filmedRanges(starts: [Double], walkBackAt: Double?, duration: Double) -> [(start: Double, end: Double)] {
@@ -133,20 +124,14 @@ struct OneTakeFill: Hashable {
 }
 
 extension Trip {
-    /// What each part of a ONE TAKE counts as where you are (1.24): for the shots with roles, the first of the part's
-    /// roles not filmed yet here and not taken by an earlier part of the same take, or else its first role, as an extra.
-    /// The shots tracked at each place (1.22) go by the place you're at; CLONE goes by the day.
-    func oneTakePlan(_ parts: [OneTakePart], day number: Int, at place: PlaceNow?) -> [OneTakeFill] {
+    /// What each part of a ONE TAKE counts as on the day (1.24): for the shots with roles, the first of the part's
+    /// roles not filmed yet and not taken by an earlier part of the same take, or else its first role, as an extra.
+    func oneTakePlan(_ parts: [OneTakePart], day number: Int) -> [OneTakeFill] {
         var taken: Set<String> = []
         var result: [OneTakeFill] = []
         for part in parts {
             let slot = ShotSlot(shot: part.shot, half: nil)
-            let coverage: SlotCoverage
-            if part.shot.perPlace, let place {
-                coverage = self.coverage(for: slot, day: number, at: place)
-            } else {
-                coverage = self.coverage(for: slot, day: number)
-            }
+            let coverage = self.coverage(for: slot, day: number)
             guard let firstRole = part.roleOrder.first else {
                 let key = part.shot.rawValue
                 result.append(OneTakeFill(part: part, role: nil, adds: !coverage.complete && !taken.contains(key)))

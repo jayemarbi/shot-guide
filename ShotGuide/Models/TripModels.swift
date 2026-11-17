@@ -74,6 +74,9 @@ struct Clip: Codable, Identifiable, Hashable {
     var parts: [ClipPart]? = nil
     /// For a ONE TAKE's part, worked out from the clip and never saved: the clip it's part of.
     var partOf: UUID? = nil
+    /// What's in it, in your words, for clips and photos added from other cameras (1.28), so the edit knows how to
+    /// use them. nil until you say.
+    var about: String? = nil
 
     static let appleLog = "Apple Log"
     static let normalColour = "Normal"
@@ -127,13 +130,6 @@ struct Clip: Codable, Identifiable, Hashable {
     var isAudio: Bool {
         ["m4a", "wav"].contains((fileName as NSString).pathExtension.lowercased())
     }
-}
-
-/// The shots skipped on a day's Next row (1.24). They come back after your next take.
-struct SkippedNext: Codable, Hashable {
-    var day: Int
-    /// ShotSuggestion.skipKey of each, in the order you skipped them.
-    var keys: [String]
 }
 
 /// Details about the place, for text on screen and "things to know before you go" reels. Since 1.27 it also keeps
@@ -228,6 +224,8 @@ struct TripFacts: Codable, Hashable {
 
 struct Trip: Codable, Identifiable, Hashable {
     var id: UUID = UUID()
+    /// The trip's name: what it is, like "Rocky Mountains Day Trip". Where it is goes in the continent, country,
+    /// state and town (1.28). Before 1.28 this was the place's name, which still works as a name.
     var place: String
     var fileCode: String
     var state: String
@@ -246,17 +244,41 @@ struct Trip: Codable, Identifiable, Hashable {
     var placeFacts: [String: TripFacts]? = nil
     /// Every day of the trip, from day 1. nil for trips from before days existed: they have one General day.
     var days: [TripDay]? = nil
-    /// Your choice for the next clip: start a new scene, or stay in the last one (1.19).
-    var nextScene: SceneChoice? = nil
-    /// Shots you've skipped on the Next row since your last take (1.24).
-    var skippedNext: SkippedNext? = nil
     /// How many people the costs are shared between, for the cost each (1.27). nil is the number you picked last.
     var costPeople: Int? = nil
     /// The currency costs are in, like "USD" (1.27). nil is the country's own.
     var currencyCode: String? = nil
+    /// The city or town it's in or nearest, like "Estes Park" (1.28): the level under the state. nil for older trips.
+    var town: String? = nil
+    /// The scripts for TALK and VOICEOVER, written from the place facts and pasted in, for filming at home (1.28).
+    var talkScript: String? = nil
+    var voiceoverScript: String? = nil
 
+    /// "Estes Park, Colorado, United States", for the list of trips.
     var regionLine: String {
-        [state, country].filter { !$0.isEmpty }.joined(separator: ", ")
+        [town ?? "", state, country].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// A day's town: its own if it moved somewhere new, otherwise the trip's.
+    func town(onDay number: Int) -> String? {
+        let own = day(number).town?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !own.isEmpty {
+            return own
+        }
+        let tripTown = town?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return tripTown.isEmpty ? nil : tripTown
+    }
+
+    /// "Estes Park · Colorado · United States", where a day was, for the top of the trip page (1.28).
+    func whereLine(day number: Int) -> String {
+        [town(onDay: number) ?? "", state, country].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The script for TALK or VOICEOVER, or nil when there isn't one yet.
+    func script(for shot: ShotType) -> String? {
+        let text = (shot == .voiceover ? voiceoverScript : talkScript)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let text, !text.isEmpty else { return nil }
+        return text
     }
 
     /// The facts about a day's place.

@@ -210,7 +210,8 @@ extension Trip {
     }
 
     /// Each spot you filmed at on a day and when you got there, from your clips: "7:40 am  Lower Falls · 12 clips". A spot
-    /// with only clips added from another day comes after the rest, with that day's date: "4 Nov 10:41 pm  Scene 2" (1.27.1).
+    /// with only clips added from another day comes after the rest, with that day's date: "4 Nov 10:41 pm  Spot 2" (1.27.1).
+    /// Spots come from where and when the clips were filmed, and take the name you gave most of their clips (1.28).
     func timeline(day number: Int) -> [String] {
         let formatter = timeFormatter(onDay: number)
         let zone = timeZone(onDay: number)
@@ -222,18 +223,19 @@ extension Trip {
         let today = day(number).startedAt
         var onTheDay: [(at: Date, line: String)] = []
         var fromOtherDays: [(at: Date, line: String)] = []
-        for scene in scenes(onDay: number) {
+        for spot in spots(onDay: number) {
             // When you got there that day, or when its first clip was filmed if they were all added from another day.
-            let first = scene.clips.first { calendar.isDate($0.recordedAt, inSameDayAs: today) }
-            guard let arrived = first ?? scene.clips.first else { continue }
-            let count = scene.clips.count
+            let first = spot.clips.first { calendar.isDate($0.recordedAt, inSameDayAs: today) }
+            guard let arrived = first ?? spot.clips.first else { continue }
+            let count = spot.clips.count
             let clipCount = count == 1 ? "1 clip" : "\(count) clips"
             let time = formatter.string(from: arrived.recordedAt)
+            let name = spot.name ?? "Spot \(spot.number)"
             if first != nil {
-                onTheDay.append((at: arrived.recordedAt, line: "\(time)  \(scene.name) · \(clipCount)"))
+                onTheDay.append((at: arrived.recordedAt, line: "\(time)  \(name) · \(clipCount)"))
             } else {
                 let date = dateFormatter.string(from: arrived.recordedAt)
-                fromOtherDays.append((at: arrived.recordedAt, line: "\(date) \(time)  \(scene.name) · \(clipCount)"))
+                fromOtherDays.append((at: arrived.recordedAt, line: "\(date) \(time)  \(name) · \(clipCount)"))
             }
         }
         let ordered = onTheDay.sorted { $0.at < $1.at } + fromOtherDays.sorted { $0.at < $1.at }

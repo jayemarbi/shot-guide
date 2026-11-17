@@ -5,10 +5,8 @@ import Foundation
 // Shots that need several takes give each take a creative role, like WIDE's establishing view or B-ROLL's
 // movement. One take fills one role, and repeats of a role are extras, so the counters reward variety.
 //
-// A take goes through four stages:
-//   recorded for its role → technically acceptable (passed the take check, or the shot has none, and wasn't
-//   stopped early) → provisionally covered → confirmed usable, once you've marked it Usable or starred it.
-// A failed take only counts if you deliberately use it anyway. Review is never required.
+// Since 1.28 every take you keep counts: deleting one is how you say no, and there's nothing to confirm. Rows you swipe
+// away for the day ("Not today", when the place doesn't have them) stop counting until they're filmed or put back.
 
 /// How much a shot matters on a day.
 enum ShotTier: String, Codable {
@@ -35,7 +33,7 @@ struct CoverageRole: Hashable, Identifiable {
     let id: String
     let title: String
     let purpose: String
-    /// Whether you're in the shot for this role. nil leaves it to the "I'm in this shot" switch.
+    /// Whether you're in the shot for this role. nil goes by the shot's usual way.
     var inShot: Bool? = nil
     /// Not part of the shot's target, like WIDE's vertical hero.
     var isOptional: Bool = false
@@ -45,7 +43,8 @@ struct CoverageRole: Hashable, Identifiable {
 }
 
 extension ShotType {
-    /// The creative roles of a shot, the usual ones first, then swap-ins. Empty for shots that just need takes.
+    /// The creative roles of a shot, the usual ones first, then swap-ins. Empty for shots that just need takes. Since
+    /// 1.28 each is a row of its own on the lists, so the camera films exactly the one you tapped.
     var roles: [CoverageRole] {
         switch self {
         case .wide:
@@ -59,10 +58,11 @@ extension ShotType {
                              inShot: true),
                 CoverageRole(id: "alternative", title: "Another angle",
                              purpose: "A clearly different shot of the place: a new viewpoint, height, side or lens, or a scene "
-                                + "that's changing."),
+                                + "that's changing.",
+                             inShot: false),
                 CoverageRole(id: "vertical-hero", title: "Vertical hero",
                              purpose: "An upright, full-screen version of the best view, for reels that play full screen.",
-                             isOptional: true)
+                             inShot: false, isOptional: true)
             ]
         case .bRoll:
             return [
@@ -141,6 +141,29 @@ extension ShotType {
                              purpose: "A real moment with your partner: laughing, a kiss, walking hand in hand, a spin. On your "
                                 + "own, a real reaction.", inShot: true)
             ]
+        case .onTheWay:
+            // 1.28: four kinds of journey shot, so you can pick exactly the one you're getting.
+            return [
+                CoverageRole(id: "getting-going", title: "Getting going",
+                             purpose: "The start of the trip: bags going in, the airport, boarding, the first coffee.",
+                             inShot: false),
+                CoverageRole(id: "window", title: "Window",
+                             purpose: "The world sliding past the glass of a plane, a train, a bus or the car.", inShot: false),
+                CoverageRole(id: "road-ahead", title: "Road ahead",
+                             purpose: "Where you're heading: the road through the windscreen, the track, the water over the bow.",
+                             inShot: false),
+                CoverageRole(id: "pulling-in", title: "Pulling in",
+                             purpose: "Arriving: the welcome sign, the car park, the trailhead, the first sight of the place.",
+                             inShot: false)
+            ]
+        case .slomo:
+            // 1.28: water in your hand, or you on the tripod. You in it counts on the days that ask for two.
+            return [
+                CoverageRole(id: "water", title: "Water and motion",
+                             purpose: "Water, waves, spray or snow, slowed right down.", inShot: false),
+                CoverageRole(id: "you", title: "You in it",
+                             purpose: "A jump, a splash or a hair flick, slowed right down.", inShot: true, isOptional: true)
+            ]
         default:
             return []
         }
@@ -160,19 +183,20 @@ extension ShotType {
         }
     }
 
-    /// REVEAL's roles are its versions, picked with the same buttons.
+    /// REVEAL's roles are its versions.
     var rolesAreVariants: Bool { self == .reveal }
 
     func role(withID id: String) -> CoverageRole? {
         roles.first { $0.id == id }
     }
 
-    /// How much this shot matters on a day, before trip types change it.
+    /// How much this shot matters on a day, before trip types change it. The creative shots and the ones filmed at
+    /// home never count, whatever this says (see `TripType.tier`).
     var tier: ShotTier {
         switch self {
         case .wide, .bRoll, .detail, .pov, .reveal, .walkaway, .moment, .ambient:
             return .core
-        case .reaction, .tele, .talk, .slomo, .matchCut, .silhouette:
+        case .reaction, .tele, .slomo:
             return .fullDay
         default:
             return .extra
@@ -207,7 +231,8 @@ extension ShotType {
 
 extension Clip {
     /// The role this take was filmed for. Takes from before 1.19 get one only where the old version shows it:
-    /// REVEAL's versions, and WIDE and WALKAWAY, which changed with the take number.
+    /// REVEAL's versions, and WIDE and WALKAWAY, which changed with the take number. SLOMO's takes from before 1.28 go
+    /// by whether you were in them.
     var roleID: String? {
         guard let type = shotType else { return nil }
         let ids = type.roles.map { $0.id }
@@ -226,12 +251,15 @@ extension Clip {
                 return "human-scale"
             }
             return take % 2 == 0 ? "alternative" : "establishing"
+        case .slomo:
+            return inShot ? "you" : "water"
         default:
             return nil
         }
     }
 
     /// Stopped well before its planned length (under 60% of it), or under 3 seconds for a take you stopped yourself.
+    /// Since 1.28 it's only a hint after the take: a take you keep counts.
     var stoppedShort: Bool {
         guard !isAdded, !isPhoto else { return false }
         if let plannedLength, plannedLength > 0 {
@@ -245,97 +273,72 @@ extension Clip {
         checkPassed != false && !stoppedShort
     }
 
-    /// Whether this take can fill coverage: you marked it Usable (which overrides a failed check), or it's
-    /// technically acceptable and you haven't marked it not usable.
+    /// Whether this take counts (1.28): every take you keep. Deleting one is how you say no. A take marked not usable
+    /// before 1.28 still doesn't.
     var countsAsCoverage: Bool {
-        if let usable {
-            return usable
-        }
-        return technicallyAcceptable
-    }
-
-    /// You've looked at it and it's good: marked Usable, or starred as the best take when it passed its check.
-    /// A star alone never overrides a failed check.
-    var confirmedUsable: Bool {
-        if let usable {
-            return usable
-        }
-        return favourite && technicallyAcceptable
+        usable != false
     }
 }
 
-/// What a take does for coverage, for the trip page and the catalogue.
+/// What a take does for coverage, for the catalogue.
 enum CoverageStatus: String {
-    /// Fills part of its shot's target, and you've confirmed it's usable.
-    case confirmed
-    /// Fills part of the target for now: technically fine, not yet confirmed.
-    case provisional
-    /// Usable, but its role (or the shot) already had a take. Welcome all the same.
+    /// Fills part of its row's target.
+    case counts
+    /// Kept, but its role (or the shot) already had a take. Welcome all the same.
     case extra
-    /// Failed the take check, and not used anyway.
-    case retake
-    /// Stopped well short of its length, and not used anyway.
-    case short
-    /// You marked it not usable.
+    /// Marked not usable, before 1.28.
     case rejected
 }
 
-/// How far one row of the trip page has got on a day.
+/// How far one shot (or WHIP's or HOME's half) has got on a day.
 struct SlotCoverage {
     struct RoleLine: Identifiable {
         let role: CoverageRole
-        /// Takes filmed for this role that count as coverage.
+        /// Takes filmed for this role that count.
         let usable: Int
-        /// Of those, the ones you've confirmed.
-        let confirmed: Int
-        /// Takes filmed for it that don't count.
-        let retakes: Int
         /// Whether one of its takes fills the target.
         let fillsTarget: Bool
+        /// Swiped away for today and not filmed, so it doesn't count (1.28).
+        let notToday: Bool
 
         var id: String { role.id }
         var covered: Bool { usable > 0 }
     }
 
+    /// What it needs today, once rows swiped away are left out.
     let target: Int
     /// Takes that fill the target, never more than it.
     let done: Int
-    /// Of those, the ones you've confirmed.
-    let confirmedDone: Int
     /// Every role, optional ones and swap-ins included. Empty for shots without roles.
     let roles: [RoleLine]
-    /// Usable takes without a role (older takes and imports) that fill the target.
+    /// Takes without a role (older takes and imports) that fill the target.
     let unsorted: Int
     let statuses: [UUID: CoverageStatus]
+    /// A shot without roles, or a half, swiped away for today and not filmed (1.28).
+    let notToday: Bool
+    /// Takes filmed today, whether they count or not.
+    let filmed: Int
 
     var complete: Bool { done >= target }
-    var fullyConfirmed: Bool { complete && confirmedDone >= target }
 
-    /// Usable takes beyond the target.
+    /// Takes beyond the target.
     var extras: Int {
         statuses.values.filter { $0 == .extra }.count
     }
 
-    /// Takes that need another go: failed, short or not usable.
-    var retakes: Int {
-        statuses.values.filter { $0 == .retake || $0 == .short || $0 == .rejected }.count
-    }
-
-    /// Roles that would add to the target: not covered yet, not optional.
+    /// Roles that would add to the target: not covered yet, not optional, not swiped away.
     var openRoleIDs: Set<String> {
         guard !complete else { return [] }
-        return Set(roles.filter { !$0.role.isOptional && !$0.covered }.map { $0.role.id })
-    }
-
-    /// The usual roles still open, for "what's missing" lists. Swap-ins aren't listed: they stand in for these.
-    var missingRoles: [CoverageRole] {
-        guard !complete else { return [] }
-        return roles.filter { !$0.role.isOptional && !$0.role.isSubstitute && !$0.covered }.map { $0.role }
+        return Set(roles.filter { !$0.role.isOptional && !$0.covered && !$0.notToday }.map { $0.role.id })
     }
 
     /// Optional roles not filmed yet, like WIDE's vertical hero.
     var openOptionalRoles: [CoverageRole] {
         roles.filter { $0.role.isOptional && !$0.covered }.map { $0.role }
+    }
+
+    func line(for roleID: String) -> RoleLine? {
+        roles.first { $0.role.id == roleID }
     }
 }
 
@@ -358,45 +361,27 @@ enum CoverageLevel: Int, CaseIterable, Identifiable {
 }
 
 extension ShotSlot {
-    /// How many roles or takes this row needs for a level of coverage on a day of a type.
-    func goal(_ level: CoverageLevel, type: TripType) -> Int {
+    /// How many roles or takes this row needs for a level of coverage on a day of a type, from what it needs today
+    /// (`target`, once rows swiped away are left out).
+    func goal(_ level: CoverageLevel, type: TripType, target: Int) -> Int {
         switch tier(for: type) {
         case .core:
-            return level == .light ? lightDayTarget(for: type) : target(for: type)
+            return level == .light ? min(lightDayTarget(for: type), target) : target
         case .fullDay:
-            return level == .full ? target(for: type) : 0
+            return level == .full ? target : 0
         case .extra:
             return 0
         }
     }
-}
 
-/// One row still short of a level.
-struct MissingCoverage: Identifiable {
-    let slot: ShotSlot
-    let needed: Int
-    /// The usual roles still open, for rows with roles.
-    let roles: [CoverageRole]
-
-    var id: String { slot.id }
-
-    /// "WIDE: Another angle", "B-ROLL: 2 more (People, Movement, Transition or a swap-in)", "TELE: 1 take".
-    var line: String {
-        let name = slot.title
-        if roles.isEmpty {
-            return "\(name): \(needed) \(needed == 1 ? "take" : "takes")"
-        }
-        let names = roles.map { $0.title }
-        if needed >= names.count {
-            return "\(name): " + names.joined(separator: ", ")
-        }
-        let swap = slot.shot.roles.contains { $0.isSubstitute } ? " or a swap-in" : ""
-        return "\(name): \(needed) more from " + Self.list(names) + swap
+    /// The key a row is swiped away by (1.28): "TELE", "WHIP-1".
+    var key: String {
+        shot.rawValue + (half.map { "-\($0)" } ?? "")
     }
 
-    private static func list(_ names: [String]) -> String {
-        guard names.count > 1, let last = names.last else { return names.first ?? "" }
-        return names.dropLast().joined(separator: ", ") + " or " + last
+    /// The key of one of its roles: "WIDE.establishing".
+    func key(role: String) -> String {
+        key + "." + role
     }
 }
 
@@ -404,8 +389,6 @@ struct MissingCoverage: Identifiable {
 struct DayCoverage {
     var doneByLevel: [CoverageLevel: Int] = [:]
     var targetByLevel: [CoverageLevel: Int] = [:]
-    /// Confirmed takes that fill the full day's targets.
-    var confirmed = 0
 
     func done(_ level: CoverageLevel) -> Int { doneByLevel[level] ?? 0 }
     func target(_ level: CoverageLevel) -> Int { targetByLevel[level] ?? 0 }
@@ -413,52 +396,41 @@ struct DayCoverage {
 }
 
 extension Trip {
-    /// How far a row has got on a day: which roles are covered, and what each take does.
+    /// How far a shot has got on a day: which roles are covered, and what each take does. Rows swiped away for the day
+    /// lower its target, but only when the others couldn't make it up: DETAIL needs 4 of its 5 kinds, so one swiped
+    /// away changes nothing, a second takes it to 3 (1.28).
     func coverage(for slot: ShotSlot, day number: Int) -> SlotCoverage {
-        let type = day(number).type
-        let target = slot.target(for: type)
+        let tripDay = day(number)
+        let type = tripDay.type
+        let away = Set(tripDay.notToday ?? [])
+        var target = slot.target(for: type)
         // A ONE TAKE counts as its parts, each a take of its own shot (1.24).
         var takes = allTakes.filter { $0.shot == slot.shot.rawValue && $0.dayNumber == number }
         if let name = slot.variantName {
             takes = takes.filter { $0.variant == name }
         }
-        // Confirmed takes first, then in the order they were filmed, so a confirmed take is the one that fills
-        // its role.
-        takes.sort { first, second in
-            if first.confirmedUsable != second.confirmedUsable {
-                return first.confirmedUsable
-            }
-            return first.recordedAt < second.recordedAt
-        }
+        takes.sort { $0.recordedAt < $1.recordedAt }
 
         var statuses: [UUID: CoverageStatus] = [:]
         for take in takes where !take.countsAsCoverage {
-            if take.usable == false {
-                statuses[take.id] = .rejected
-            } else {
-                statuses[take.id] = take.checkPassed == false ? .retake : .short
-            }
+            statuses[take.id] = .rejected
         }
         let usable = takes.filter { $0.countsAsCoverage }
         let roles = slot.half == nil ? slot.shot.roles(for: type) : []
         var done = 0
-        var confirmedDone = 0
         var lines: [SlotCoverage.RoleLine] = []
         var unsortedCount = 0
-        var filling: Set<String> = []
-
-        func fill(_ take: Clip) {
-            statuses[take.id] = take.confirmedUsable ? .confirmed : .provisional
-            done += 1
-            if take.confirmedUsable {
-                confirmedDone += 1
-            }
-        }
+        var rowAway = false
 
         if roles.isEmpty {
+            if usable.isEmpty && away.contains(slot.key) {
+                rowAway = true
+                target = 0
+            }
             for take in usable {
                 if done < target {
-                    fill(take)
+                    statuses[take.id] = .counts
+                    done += 1
                 } else {
                     statuses[take.id] = .extra
                 }
@@ -473,34 +445,38 @@ extension Trip {
                     unsorted.append(take)
                 }
             }
+            let counted = roles.filter { !$0.isOptional && !$0.isSubstitute }
+            // Swiped away and not filmed today.
+            let awayRoles = Set(roles.filter { byRole[$0.id] == nil && away.contains(slot.key(role: $0.id)) }.map { $0.id })
+            let countedAway = counted.filter { awayRoles.contains($0.id) }.count
+            let spare = max(0, counted.count - target)
+            target = max(0, target - max(0, countedAway - spare))
+
             // One take per role, the usual roles before swap-ins. Repeats of a role are extras.
-            let ordered = roles.filter { !$0.isOptional && !$0.isSubstitute } + roles.filter { $0.isSubstitute }
-            for role in ordered where done < target {
+            var filling: Set<String> = []
+            for role in counted + roles.filter({ $0.isSubstitute }) where done < target {
                 if let take = byRole[role.id]?.first {
-                    fill(take)
+                    statuses[take.id] = .counts
+                    done += 1
                     filling.insert(role.id)
                 }
             }
             for take in unsorted where done < target {
-                fill(take)
+                statuses[take.id] = .counts
+                done += 1
                 unsortedCount += 1
             }
             for take in usable where statuses[take.id] == nil {
                 statuses[take.id] = .extra
             }
             for role in roles {
-                let filmed = takes.filter { $0.roleID == role.id }
-                let usableTakes = filmed.filter { $0.countsAsCoverage }
-                lines.append(SlotCoverage.RoleLine(
-                    role: role,
-                    usable: usableTakes.count,
-                    confirmed: usableTakes.filter { $0.confirmedUsable }.count,
-                    retakes: filmed.count - usableTakes.count,
-                    fillsTarget: filling.contains(role.id)))
+                lines.append(SlotCoverage.RoleLine(role: role, usable: byRole[role.id]?.count ?? 0,
+                                                   fillsTarget: filling.contains(role.id),
+                                                   notToday: awayRoles.contains(role.id)))
             }
         }
-        return SlotCoverage(target: target, done: done, confirmedDone: confirmedDone, roles: lines,
-                            unsorted: unsortedCount, statuses: statuses)
+        return SlotCoverage(target: target, done: done, roles: lines, unsorted: unsortedCount, statuses: statuses,
+                            notToday: rowAway, filmed: takes.count)
     }
 
     /// The day's progress at each level. Light counts towards everyday, and everyday towards full: every level
@@ -508,192 +484,45 @@ extension Trip {
     func dayCoverage(_ number: Int) -> DayCoverage {
         let type = day(number).type
         var result = DayCoverage()
-        for slot in TripPhase.allSlots {
-            let fullGoal = slot.goal(.full, type: type)
-            guard fullGoal > 0 else { continue }
+        for slot in TripPhase.allSlots where slot.tier(for: type) != .extra {
             let coverage = self.coverage(for: slot, day: number)
             for level in CoverageLevel.allCases {
-                let goal = slot.goal(level, type: type)
+                let goal = slot.goal(level, type: type, target: coverage.target)
                 result.doneByLevel[level, default: 0] += min(coverage.done, goal)
                 result.targetByLevel[level, default: 0] += goal
             }
-            result.confirmed += min(coverage.confirmedDone, fullGoal)
         }
         return result
     }
 
-    /// Rows still short of a level, in the order of the day.
-    func missing(_ level: CoverageLevel, day number: Int) -> [MissingCoverage] {
+    /// How far one part of the day has got (1.28): what its shots that count have, out of what they need today.
+    func progress(of part: TripPhase, day number: Int) -> (done: Int, target: Int) {
         let type = day(number).type
-        var result: [MissingCoverage] = []
-        for slot in TripPhase.allSlots {
-            let goal = slot.goal(level, type: type)
-            guard goal > 0 else { continue }
+        var done = 0
+        var target = 0
+        for slot in part.slots where slot.tier(for: type) != .extra {
             let coverage = self.coverage(for: slot, day: number)
-            let needed = goal - min(coverage.done, goal)
-            guard needed > 0 else { continue }
-            result.append(MissingCoverage(slot: slot, needed: needed, roles: coverage.missingRoles))
+            done += min(coverage.done, coverage.target)
+            target += coverage.target
         }
-        return result
-    }
-
-    /// What's worth filming next on a day, best first: the rows the lowest unfinished level still needs, in the order
-    /// of the day, each with the role it still needs, then the next level's. ONE TAKE comes just before the first of its
-    /// shots when two or more of them are still needed at that level, as one set-up films them all (1.24), counting only
-    /// the ones it can fill (1.25.1: not MOMENT · Together).
-    func nextSuggestions(day number: Int) -> [ShotSuggestion] {
-        var result: [ShotSuggestion] = []
-        var seen: Set<String> = []
-        func add(_ suggestion: ShotSuggestion) {
-            guard !seen.contains(suggestion.skipKey) else { return }
-            seen.insert(suggestion.skipKey)
-            result.append(suggestion)
-        }
-        let type = day(number).type
-        for level in CoverageLevel.allCases {
-            let rows = missing(level, day: number)
-            let oneTakeRows = rows.filter { OneTakePart.canFill($0) }
-            for row in rows {
-                if oneTakeRows.count >= 2, row.id == oneTakeRows.first?.id {
-                    add(ShotSuggestion(shot: .oneTake))
-                }
-                let coverage = self.coverage(for: row.slot, day: number)
-                let role = row.slot.shot.nextRole(after: nil, open: coverage.openRoleIDs, type: type)
-                add(ShotSuggestion(shot: row.slot.shot, half: row.slot.half, role: role?.id))
-            }
-        }
-        return result
-    }
-
-    /// The next useful thing to film on a day, leaving out the shots you've skipped on the Next row since your last
-    /// take (1.24): skip one and the one after comes forward, and the skipped one is back after your next take. Once
-    /// everything's been skipped, it starts again from the top.
-    func nextSuggestion(day number: Int) -> ShotSuggestion? {
-        let all = nextSuggestions(day: number)
-        let skipped = Set(skippedNext?.day == number ? skippedNext?.keys ?? [] : [])
-        return all.first { !skipped.contains($0.skipKey) } ?? all.first
+        return (done, target)
     }
 }
 
-// MARK: Scenes
+// MARK: Spots
 
-/// The five things a short story about one place needs. Each is filled by shots you already film.
-enum SceneIngredient: String, CaseIterable, Identifiable {
-    case establish
-    case approach
-    case interact
-    case experience
-    case atmosphere
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .establish: return "Establish"
-        case .approach: return "Approach"
-        case .interact: return "Interact"
-        case .experience: return "Experience"
-        case .atmosphere: return "Atmosphere"
-        }
-    }
-
-    var hint: String {
-        switch self {
-        case .establish: return "Show the place"
-        case .approach: return "You arriving or moving towards it"
-        case .interact: return "A meaningful action or detail"
-        case .experience: return "You enjoying it or reacting to it"
-        case .atmosphere: return "Its visuals or natural sound"
-        }
-    }
-
-    /// Shots to film for it, best first. The trip page picks the first one the day still needs.
-    var suggestions: [ShotSuggestion] {
-        switch self {
-        case .establish:
-            return [ShotSuggestion(shot: .wide, role: "establishing"), ShotSuggestion(shot: .reveal),
-                    ShotSuggestion(shot: .wide, role: "alternative")]
-        case .approach:
-            return [ShotSuggestion(shot: .pov, role: "approach"), ShotSuggestion(shot: .walkaway, role: "into-view"),
-                    ShotSuggestion(shot: .pov, role: "through")]
-        case .interact:
-            return [ShotSuggestion(shot: .detail, role: "hands"), ShotSuggestion(shot: .moment, role: "with-place"),
-                    ShotSuggestion(shot: .detail)]
-        case .experience:
-            return [ShotSuggestion(shot: .moment, role: "together"), ShotSuggestion(shot: .wide, role: "human-scale"),
-                    ShotSuggestion(shot: .reaction)]
-        case .atmosphere:
-            return [ShotSuggestion(shot: .ambient), ShotSuggestion(shot: .bRoll, role: "atmosphere"),
-                    ShotSuggestion(shot: .bRoll)]
-        }
-    }
-}
-
-/// A shot, and optionally the half or role to open it on.
-struct ShotSuggestion: Hashable {
-    let shot: ShotType
-    var half: Int? = nil
-    var role: String? = nil
-
-    var slot: ShotSlot {
-        ShotSlot(shot: shot, half: half, role: role)
-    }
-
-    /// Skip leaves out the whole shot (or WHIP's or HOME's half), whatever role it was on (1.24).
-    var skipKey: String {
-        shot.rawValue + (half.map { "-\($0)" } ?? "")
-    }
-
-    var title: String {
-        if let half, half < shot.variants.count {
-            return "\(shot.title) · \(shot.variants[half])"
-        }
-        guard let role, let match = shot.role(withID: role) else { return shot.title }
-        return "\(shot.title) · \(match.title)"
-    }
-}
-
-extension Clip {
-    /// The part of a scene's story this take fills. One take fills one part.
-    var sceneIngredient: SceneIngredient? {
-        guard let type = shotType else { return nil }
-        let role = roleID
-        switch type {
-        case .wide:
-            return role == "human-scale" ? .experience : .establish
-        case .reveal:
-            return .establish
-        case .pov, .walkaway, .follow, .onTheWay, .hyperlapse, .stay:
-            return .approach
-        case .detail, .food, .sounds, .slomo, .matchCut, .clone:
-            return .interact
-        case .moment:
-            return role == "with-place" ? .interact : .experience
-        case .reaction, .talk, .silhouette, .tele, .orbit, .dance:
-            return .experience
-        case .ambient, .bRoll, .timelapse, .reflection, .wildlife:
-            return .atmosphere
-        case .whip, .home, .voiceover, .oneTake:
-            return nil
-        }
-    }
-}
-
-/// The clips filmed at one place on a day.
-struct ClipScene: Identifiable {
+/// Clips filmed close together on a day (1.28), worked out from where and when each was filmed. It goes in the
+/// catalogue, so the edit can see which shots go together. Nothing on screen depends on it, and nothing is named for
+/// you: you name your clips yourself.
+struct ClipSpot: Identifiable {
     let number: Int
     let clips: [Clip]
 
     var id: Int { number }
 
-    /// The place's name, like "Twin Falls", or "Scene 2" before it has one.
-    var name: String {
-        placeName ?? "Scene \(number)"
-    }
-
-    /// The name most of its clips share (the first one given, if it's a tie), set by naming the place or the clips
-    /// (1.21). nil until a clip there has a name.
-    var placeName: String? {
+    /// The name most of its clips share (the first one given, if it's a tie), like "Alberta Falls". nil until a clip
+    /// there has one.
+    var name: String? {
         var counts: [String: Int] = [:]
         var order: [String] = []
         for name in clips.compactMap({ $0.displayName }) {
@@ -705,39 +534,13 @@ struct ClipScene: Identifiable {
         // max(by:) keeps the first of equal counts, so a tie goes to the name given first.
         return order.max { (counts[$0] ?? 0) < (counts[$1] ?? 0) }
     }
-
-    /// Every clip's place in the scene confirmed by you. Otherwise the grouping is the app's suggestion.
-    var confirmed: Bool {
-        !clips.isEmpty && clips.allSatisfy { $0.sceneConfirmed == true }
-    }
-
-    /// What the scene has, from takes that count. A ONE TAKE brings each of its parts (1.24).
-    var ingredients: Set<SceneIngredient> {
-        Set(clips.flatMap { $0.takes }.filter { $0.countsAsCoverage }.compactMap { $0.sceneIngredient })
-    }
-}
-
-/// Your choice for the next clip of a day: start a new scene, or stay in the last one, whatever the distance.
-struct SceneChoice: Codable, Hashable {
-    var day: Int
-    var startsNew: Bool
-    /// The new place's name, when you named it with New place (1.21). Its clips get it.
-    var name: String? = nil
 }
 
 extension Trip {
-    /// The app's suggestion: a new scene starts when a clip is over 1 km from the one before it or, without
-    /// locations, 45 minutes after it. You can correct any of it.
-    static let sceneDistance: Double = 1000
-    static let sceneGap: TimeInterval = 45 * 60
-
-    static func isNewScene(previousLatitude: Double?, previousLongitude: Double?, previousDate: Date,
-                           latitude: Double?, longitude: Double?, date: Date) -> Bool {
-        if let lat1 = previousLatitude, let lon1 = previousLongitude, let lat2 = latitude, let lon2 = longitude {
-            return distanceMetres(lat1, lon1, lat2, lon2) > sceneDistance
-        }
-        return date.timeIntervalSince(previousDate) > sceneGap
-    }
+    /// A new spot starts more than 250 m from where the last one started or, without locations, after 20 minutes with
+    /// nothing filmed. Close enough to keep two waterfalls on one trail apart (until 1.28, scenes went by a kilometre).
+    static let spotDistance: Double = 250
+    static let spotGap: TimeInterval = 20 * 60
 
     /// Distance over the earth's surface, in metres.
     static func distanceMetres(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
@@ -750,206 +553,38 @@ extension Trip {
         return 2 * radius * atan2(a.squareRoot(), (1 - a).squareRoot())
     }
 
-    /// Each clip's scene on a day. Clips filmed since 1.19 keep the scene they were given; older clips and imports
-    /// are worked out with the same rule, in the order they were filmed.
-    func sceneNumbers(onDay number: Int) -> [UUID: Int] {
+    /// The day's spots, in the order they were filmed.
+    func spots(onDay number: Int) -> [ClipSpot] {
         let dayClips = clips(onDay: number).sorted { $0.recordedAt < $1.recordedAt }
-        var next = (dayClips.compactMap { $0.scene }.max() ?? 0) + 1
-        var result: [UUID: Int] = [:]
-        var previous: Clip? = nil
-        var current: Int? = nil
+        var result: [ClipSpot] = []
+        var current: [Clip] = []
+        // The spot's first clip with a location: the next one is measured from there, so a slow walk along a trail
+        // doesn't drag one spot along with it.
+        var anchor: Clip? = nil
         for clip in dayClips {
-            if let stored = clip.scene {
-                current = stored
-            } else if let previous, current != nil,
-                      !Self.isNewScene(previousLatitude: previous.latitude, previousLongitude: previous.longitude,
-                                       previousDate: previous.recordedAt, latitude: clip.latitude,
-                                       longitude: clip.longitude, date: clip.recordedAt) {
-                // Same scene as the clip before.
-            } else {
-                current = next
-                next += 1
+            if let last = current.last {
+                let startsNew: Bool
+                if let anchor, let lat1 = anchor.latitude, let lon1 = anchor.longitude,
+                   let lat2 = clip.latitude, let lon2 = clip.longitude {
+                    startsNew = Self.distanceMetres(lat1, lon1, lat2, lon2) > Self.spotDistance
+                } else {
+                    startsNew = clip.recordedAt.timeIntervalSince(last.recordedAt) > Self.spotGap
+                }
+                if startsNew {
+                    result.append(ClipSpot(number: result.count + 1, clips: current))
+                    current = []
+                    anchor = nil
+                }
             }
-            result[clip.id] = current
-            previous = clip
+            current.append(clip)
+            if anchor == nil, clip.latitude != nil, clip.longitude != nil {
+                anchor = clip
+            }
+        }
+        if !current.isEmpty {
+            result.append(ClipSpot(number: result.count + 1, clips: current))
         }
         return result
-    }
-
-    /// The day's scenes, in the order they were filmed.
-    func scenes(onDay number: Int) -> [ClipScene] {
-        let numbers = sceneNumbers(onDay: number)
-        let dayClips = clips(onDay: number).sorted { $0.recordedAt < $1.recordedAt }
-        var order: [Int] = []
-        var grouped: [Int: [Clip]] = [:]
-        for clip in dayClips {
-            guard let scene = numbers[clip.id] else { continue }
-            if grouped[scene] == nil {
-                order.append(scene)
-            }
-            grouped[scene, default: []].append(clip)
-        }
-        return order.map { ClipScene(number: $0, clips: grouped[$0] ?? []) }
-    }
-
-    /// The app's suggestion: whether a clip filmed here and now would start a new scene on the day.
-    func suggestsNewScene(day number: Int, latitude: Double?, longitude: Double?, at date: Date) -> Bool {
-        guard let last = clips(onDay: number).max(by: { $0.recordedAt < $1.recordedAt }) else { return true }
-        return Self.isNewScene(previousLatitude: last.latitude, previousLongitude: last.longitude,
-                               previousDate: last.recordedAt, latitude: latitude, longitude: longitude, date: date)
-    }
-
-    /// The scene for a clip filmed here and now, and whether that's your choice (confirmed) or the app's suggestion.
-    func sceneForNewClip(day number: Int, latitude: Double?, longitude: Double?, at date: Date) -> (scene: Int, confirmed: Bool) {
-        let numbers = sceneNumbers(onDay: number)
-        let highest = numbers.values.max() ?? 0
-        let choice = nextScene?.day == number ? nextScene : nil
-        guard let last = clips(onDay: number).max(by: { $0.recordedAt < $1.recordedAt }),
-              let lastScene = numbers[last.id] else {
-            return (highest + 1, choice != nil)
-        }
-        if let choice {
-            return (choice.startsNew ? highest + 1 : lastScene, true)
-        }
-        if suggestsNewScene(day: number, latitude: latitude, longitude: longitude, at: date) {
-            return (highest + 1, false)
-        }
-        return (lastScene, false)
-    }
-
-    /// Saves the worked-out scene of every clip on a day, so changing one scene doesn't move the others.
-    mutating func fixScenes(onDay number: Int) {
-        let numbers = sceneNumbers(onDay: number)
-        for index in clips.indices where clips[index].dayNumber == number && clips[index].scene == nil {
-            clips[index].scene = numbers[clips[index].id]
-        }
-    }
-
-    /// Joins a scene to the one filmed before it.
-    mutating func mergeScene(_ scene: Int, onDay number: Int) {
-        fixScenes(onDay: number)
-        let order = scenes(onDay: number).map { $0.number }
-        guard let position = order.firstIndex(of: scene), position > 0 else { return }
-        let into = order[position - 1]
-        for index in clips.indices where clips[index].dayNumber == number && clips[index].scene == scene {
-            clips[index].scene = into
-            clips[index].sceneConfirmed = true
-        }
-    }
-
-    /// Starts a new scene at a clip: it and the later clips of its scene move to the new one.
-    mutating func splitScene(at clipID: UUID) {
-        guard let clip = clips.first(where: { $0.id == clipID }) else { return }
-        let number = clip.dayNumber
-        fixScenes(onDay: number)
-        guard let current = clips.first(where: { $0.id == clipID })?.scene else { return }
-        let newScene = (clips.filter { $0.dayNumber == number }.compactMap { $0.scene }.max() ?? 0) + 1
-        for index in clips.indices where clips[index].dayNumber == number && clips[index].scene == current {
-            if clips[index].recordedAt >= clip.recordedAt {
-                clips[index].scene = newScene
-                clips[index].sceneConfirmed = true
-            }
-        }
-    }
-
-    /// Moves one clip into another scene of its day.
-    mutating func moveClip(_ clipID: UUID, toScene scene: Int) {
-        guard let position = clips.firstIndex(where: { $0.id == clipID }) else { return }
-        fixScenes(onDay: clips[position].dayNumber)
-        clips[position].scene = scene
-        clips[position].sceneConfirmed = true
-    }
-
-    /// Marks a scene as right: its clips' places in it are confirmed.
-    mutating func confirmScene(_ scene: Int, onDay number: Int) {
-        fixScenes(onDay: number)
-        for index in clips.indices where clips[index].dayNumber == number && clips[index].scene == scene {
-            clips[index].sceneConfirmed = true
-        }
-    }
-
-    /// Names (or renames) a place (1.21): its clips without a name, or with the place's old name, get this one. Clips
-    /// you gave a name of their own keep it. Returns the clips that changed, so their files can be renamed to match.
-    mutating func namePlace(_ scene: Int, onDay number: Int, name: String) -> [UUID] {
-        fixScenes(onDay: number)
-        let old = scenes(onDay: number).first { $0.number == scene }?.placeName
-        var named: [UUID] = []
-        for index in clips.indices where clips[index].dayNumber == number && clips[index].scene == scene {
-            let current = clips[index].displayName
-            guard current == nil || current == old, current != name else { continue }
-            clips[index].name = name
-            named.append(clips[index].id)
-        }
-        return named
-    }
-}
-
-// MARK: The place you're at
-
-extension ShotType {
-    /// The shots that show what makes each place its own, tracked at each place on a day at more than one (1.22): a
-    /// second waterfall gets its own REACTION, REVEAL, WIDE, TELE, WALKAWAY, MOMENT, SLOMO, MATCH CUT and AMBIENT. The
-    /// rest, like B-ROLL, DETAIL and POV, are gathered for the day as a whole.
-    var perPlace: Bool {
-        switch self {
-        case .reaction, .reveal, .wide, .tele, .walkaway, .moment, .slomo, .matchCut, .ambient:
-            return true
-        default:
-            return false
-        }
-    }
-}
-
-/// Where your next clip goes on a day that's been at more than one place (1.21): one of the day's scenes, or a new
-/// place with no clips yet.
-struct PlaceNow: Equatable {
-    /// The scene, or nil for a new place your next clip starts.
-    let scene: Int?
-    /// Its name, if it has one.
-    let name: String?
-
-    /// "At Twin Falls", "At Scene 2" or "At the new place", over the role buttons.
-    var caption: String {
-        if let name {
-            return "At \(name)"
-        }
-        return scene.map { "At Scene \($0)" } ?? "At the new place"
-    }
-}
-
-extension Trip {
-    /// Whether your next clip starts a new scene: your choice if you made one, otherwise the app's suggestion from
-    /// where you are and when you filmed last.
-    func nextClipStartsScene(day number: Int, latitude: Double?, longitude: Double?, at date: Date) -> Bool {
-        if let choice = nextScene, choice.day == number {
-            return choice.startsNew
-        }
-        return suggestsNewScene(day: number, latitude: latitude, longitude: longitude, at: date)
-    }
-
-    /// The place you're filming at, once a day has been at more than one, or is about to be. nil for a day at one
-    /// place, where the role buttons follow the whole day as before.
-    func placeNow(day number: Int, startsNew: Bool) -> PlaceNow? {
-        let dayScenes = scenes(onDay: number)
-        guard let last = dayScenes.last else { return nil }
-        if startsNew {
-            let chosen = nextScene?.day == number ? nextScene?.name : nil
-            return PlaceNow(scene: nil, name: chosen)
-        }
-        guard dayScenes.count > 1 else { return nil }
-        return PlaceNow(scene: last.number, name: last.placeName)
-    }
-
-    /// A row's roles at one place: only the takes filmed there count. The day's own counts are unchanged, so a role
-    /// filmed again at a second place is still an extra for the day.
-    func coverage(for slot: ShotSlot, day number: Int, at place: PlaceNow) -> SlotCoverage {
-        var here: Set<UUID> = []
-        if let scene = place.scene, let match = scenes(onDay: number).first(where: { $0.number == scene }) {
-            here = Set(match.clips.map { $0.id })
-        }
-        var atPlace = self
-        atPlace.clips = clips.filter { $0.dayNumber != number || here.contains($0.id) }
-        return atPlace.coverage(for: slot, day: number)
     }
 }
 
@@ -958,12 +593,13 @@ extension Trip {
 /// A clip's coverage details for the catalogue.
 struct ClipCoverageInfo {
     var status: CoverageStatus? = nil
+    /// Its spot on the day (1.28), in the catalogue's scene columns.
     var scene: Int? = nil
     var sceneName: String? = nil
 }
 
 extension Trip {
-    /// Every clip's coverage status and scene.
+    /// Every clip's coverage status and spot.
     func coverageByClip() -> [UUID: ClipCoverageInfo] {
         var result: [UUID: ClipCoverageInfo] = [:]
         for tripDay in allDays {
@@ -972,10 +608,10 @@ extension Trip {
                     result[id, default: ClipCoverageInfo()].status = status
                 }
             }
-            for scene in scenes(onDay: tripDay.number) {
-                for clip in scene.clips {
-                    result[clip.id, default: ClipCoverageInfo()].scene = scene.number
-                    result[clip.id, default: ClipCoverageInfo()].sceneName = scene.name
+            for spot in spots(onDay: tripDay.number) {
+                for clip in spot.clips {
+                    result[clip.id, default: ClipCoverageInfo()].scene = spot.number
+                    result[clip.id, default: ClipCoverageInfo()].sceneName = spot.name
                 }
             }
         }

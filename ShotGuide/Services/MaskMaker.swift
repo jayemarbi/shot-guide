@@ -93,6 +93,13 @@ enum MaskMaker {
         var written = 0
         var frameIndex = 0
         var lookPool: CVPixelBufferPool? = nil
+        // Looking for you in four close-ups of the frame while nobody's been found (1.28), for up to 4 seconds at a
+        // time, then once a second. A cutout of its own, as the sequence handler expects the same part each frame.
+        let tileCutout = VNGeneratePersonSegmentationRequest()
+        tileCutout.qualityLevel = .balanced
+        tileCutout.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        var searchedFrames = 0
+        let searchLimit = Int(max(frameRate, 24)) * 4
 
         while let sample = output.copyNextSampleBuffer() {
             guard let frame = CMSampleBufferGetImageBuffer(sample) else { continue }
@@ -144,32 +151,73 @@ enum MaskMaker {
                 // That part of the frame, at the mask's size. `used` stays this frame's part, as following you moves
                 // `window` on for the next one.
                 let used = window
-                let area = CGRect(x: used.x * fullSize.width, y: used.y * fullSize.height,
-                                  width: used.size * fullSize.width, height: used.size * fullSize.height)
-                let zoom = CGFloat(width) / max(area.width, 1)
-                let part = full.cropped(to: area)
-                    .transformed(by: CGAffineTransform(translationX: -area.minX, y: -area.minY))
-                    .transformed(by: CGAffineTransform(scaleX: zoom, y: zoom))
-                guard (try? handler.perform([cutout], on: part)) != nil,
-                      let maskBuffer = cutout.results?.first?.pixelBuffer else { return false }
-                let mask = CIImage(cvPixelBuffer: maskBuffer)
-                guard mask.extent.width > 0, mask.extent.height > 0 else { return false }
-
-                // Where the cutout found you: that counts as seeing you, and when the finder missed you, the close-up
-                // moves to follow you for the next frame (1.27.1).
-                if let box = Self.personBox(in: maskBuffer, window: used) {
-                    lastSeen = thisFrame
-                    if !finderSawYou, let target = Window.around([box]) {
-                        window = window.following(target)
+                let lost = used == .whole && thisFrame - lastSeen > holdFrames
+                let searching = lost && (searchedFrames < searchLimit || thisFrame % Int(max(frameRate, 24)) == 0)
+                var combined = black
+                if searching {
+                    // Nobody found for a while: someone lying down, or dark against a bright sky, can be missed by
+                    // the finder and too small for a cutout of the whole frame (1.28). Four overlapping close-ups
+                    // find them, and once they're found, the close-up follows them as usual.
+                    searchedFrames += 1
+                    var boxes: [CGRect] = []
+                    for tile in Window.tiles {
+                        let tileArea = CGRect(x: tile.x * fullSize.width, y: tile.y * fullSize.height,
+                                              width: tile.size * fullSize.width, height: tile.size * fullSize.height)
+                        let tileZoom = CGFloat(width) / max(tileArea.width, 1)
+                        let tilePart = full.cropped(to: tileArea)
+                            .transformed(by: CGAffineTransform(translationX: -tileArea.minX, y: -tileArea.minY))
+                            .transformed(by: CGAffineTransform(scaleX: tileZoom, y: tileZoom))
+                        guard (try? VNImageRequestHandler(ciImage: tilePart, options: [:]).perform([tileCutout])) != nil,
+                              let tileBuffer = tileCutout.results?.first?.pixelBuffer else { continue }
+                        if let box = Self.personBox(in: tileBuffer, window: tile) {
+                            boxes.append(box)
+                        }
+                        let tileMask = CIImage(cvPixelBuffer: tileBuffer)
+                        guard tileMask.extent.width > 0, tileMask.extent.height > 0 else { continue }
+                        let placedTile = tileMask
+                            .transformed(by: CGAffineTransform(scaleX: tile.size * CGFloat(width) / tileMask.extent.width,
+                                                               y: tile.size * CGFloat(height) / tileMask.extent.height))
+                            .transformed(by: CGAffineTransform(translationX: tile.x * CGFloat(width),
+                                                               y: tile.y * CGFloat(height)))
+                        combined = placedTile.applyingFilter("CIMaximumCompositing",
+                                                             parameters: [kCIInputBackgroundImageKey: combined])
                     }
-                }
+                    if let target = Window.around(boxes) {
+                        lastSeen = thisFrame
+                        window = target
+                        searchedFrames = 0
+                    }
+                } else {
+                    let area = CGRect(x: used.x * fullSize.width, y: used.y * fullSize.height,
+                                      width: used.size * fullSize.width, height: used.size * fullSize.height)
+                    let zoom = CGFloat(width) / max(area.width, 1)
+                    let part = full.cropped(to: area)
+                        .transformed(by: CGAffineTransform(translationX: -area.minX, y: -area.minY))
+                        .transformed(by: CGAffineTransform(scaleX: zoom, y: zoom))
+                    guard (try? handler.perform([cutout], on: part)) != nil,
+                          let maskBuffer = cutout.results?.first?.pixelBuffer else { return false }
+                    let mask = CIImage(cvPixelBuffer: maskBuffer)
+                    guard mask.extent.width > 0, mask.extent.height > 0 else { return false }
 
-                // Back where that part sits in the frame, black everywhere else.
-                let placed = mask
-                    .transformed(by: CGAffineTransform(scaleX: used.size * CGFloat(width) / mask.extent.width,
-                                                       y: used.size * CGFloat(height) / mask.extent.height))
-                    .transformed(by: CGAffineTransform(translationX: used.x * CGFloat(width), y: used.y * CGFloat(height)))
-                let fitted = placed.composited(over: black)
+                    // Where the cutout found you: that counts as seeing you, and when the finder missed you, the
+                    // close-up moves to follow you for the next frame (1.27.1).
+                    if let box = Self.personBox(in: maskBuffer, window: used) {
+                        lastSeen = thisFrame
+                        searchedFrames = 0
+                        if !finderSawYou, let target = Window.around([box]) {
+                            window = window.following(target)
+                        }
+                    }
+
+                    // Back where that part sits in the frame, black everywhere else.
+                    combined = mask
+                        .transformed(by: CGAffineTransform(scaleX: used.size * CGFloat(width) / mask.extent.width,
+                                                           y: used.size * CGFloat(height) / mask.extent.height))
+                        .transformed(by: CGAffineTransform(translationX: used.x * CGFloat(width),
+                                                           y: used.y * CGFloat(height)))
+                        .composited(over: black)
+                }
+                let fitted = combined
                     .cropped(to: bounds)
                     .applyingFilter("CIColorMatrix", parameters: [
                         "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
@@ -209,6 +257,12 @@ enum MaskMaker {
         var size: CGFloat
 
         static let whole = Window(x: 0, y: 0, size: 1)
+
+        /// Four overlapping close-ups covering the whole frame, for finding someone the person finder missed (1.28).
+        static let tiles: [Window] = [
+            Window(x: 0, y: 0, size: 0.6), Window(x: 0.4, y: 0, size: 0.6),
+            Window(x: 0, y: 0.4, size: 0.6), Window(x: 0.4, y: 0.4, size: 0.6)
+        ]
 
         /// Around the people found, with room for arms, hair and feet. nil when nobody was found; the whole frame when
         /// they fill most of it.

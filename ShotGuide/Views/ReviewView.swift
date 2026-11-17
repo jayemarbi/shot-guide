@@ -3,15 +3,14 @@ import ImageIO
 import SwiftUI
 import UIKit
 
-/// Shown after each take (and when you tap a clip later): watch it back, name it, tag it, star it or delete it.
+/// A clip in full (tapped under Clips, or played from the card after a take): watch it back, name it, tag it, star it
+/// or delete it. Every take you keep counts (1.28), so there's nothing to confirm.
 struct ReviewView: View {
     let tripID: UUID
     let clipID: UUID
     var autoplay: Bool
     var preselectSuggestions: Bool
     var title: String
-    /// A line under the name box when it was filled in for you, like "Same as your last clip here".
-    var nameNote: String? = nil
 
     @EnvironmentObject var store: TripStore
     @EnvironmentObject var tagLibrary: TagLibrary
@@ -23,13 +22,12 @@ struct ReviewView: View {
     @State private var suggested: Set<String> = []
     @State private var selected: Set<String> = []
     @State private var favourite = false
-    /// Your verdict: Usable (or Use anyway), Not usable, or not checked yet.
-    @State private var usableChoice: Bool? = nil
     /// The creative role, for shots with roles.
     @State private var roleChoice: String? = nil
     @State private var notes = ""
     @State private var name = ""
-    @State private var shotName = ""
+    /// What's in a clip from another camera (1.28), for the catalogue.
+    @State private var about = ""
     @State private var loaded = false
     @State private var deleted = false
     @State private var confirmDelete = false
@@ -46,17 +44,6 @@ struct ReviewView: View {
         case failed(String)
     }
 
-    /// Shot types a clip added from Photos can be given, in the trip page's order. WHIP needs halves, so it's left out,
-    /// and so is ONE TAKE, whose parts are marked as it's filmed.
-    static let importChoices: [ShotType] = {
-        var choices: [ShotType] = []
-        for slot in TripPhase.allSlots where !slot.shot.isTransition && slot.shot != .voiceover && slot.shot != .oneTake
-            && !choices.contains(slot.shot) {
-            choices.append(slot.shot)
-        }
-        return choices
-    }()
-
     private var clip: Clip? {
         store.trip(id: tripID)?.clips.first { $0.id == clipID }
     }
@@ -68,13 +55,16 @@ struct ReviewView: View {
                     media
                     gradedCopySection
                     checkSection
-                    coverageSection
-                    if let clip, clip.isOneTake {
-                        partsSection(clip)
+                    if clip?.isAdded == true {
+                        aboutSection
                     }
                     nameSection
-                    if clip?.isAdded == true {
-                        shotPicker
+                    if let clip, clip.isAdded {
+                        shotPicker(clip)
+                    }
+                    roleSection
+                    if let clip, clip.isOneTake {
+                        partsSection(clip)
                     }
                     if let clip {
                         details(for: clip)
@@ -107,7 +97,6 @@ struct ReviewView: View {
                 save()
             }
             .onChange(of: favourite) { _, _ in saveCoverageChoices() }
-            .onChange(of: usableChoice) { _, _ in saveCoverageChoices() }
             .onChange(of: roleChoice) { _, _ in saveCoverageChoices() }
             .confirmationDialog("Delete this take?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
@@ -233,26 +222,12 @@ struct ReviewView: View {
 
     // MARK: Coverage
 
-    /// The take's creative role, whether it counts, and the choice to confirm it or use it anyway. Never required:
-    /// a take that passed its check counts for now without any of this.
+    /// What a filmed take was for, like WIDE's Establishing, so a take filmed for the wrong one can be moved. Clips from
+    /// another camera get theirs from Shot type.
     @ViewBuilder
-    private var coverageSection: some View {
-        if let clip, let type = clip.shotType, !clip.isPhoto {
-            VStack(alignment: .leading, spacing: 10) {
-                if !type.roles.isEmpty {
-                    roleRow(type)
-                }
-                Picker("Usable?", selection: $usableChoice) {
-                    Text("Not checked").tag(Bool?.none)
-                    Text(clip.technicallyAcceptable ? "Usable" : "Use anyway").tag(Bool?.some(true))
-                    Text("Not usable").tag(Bool?.some(false))
-                }
-                .pickerStyle(.segmented)
-                Text(coverageNote(clip))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                sceneRow(clip)
-            }
+    private var roleSection: some View {
+        if let clip, let type = clip.shotType, !clip.isPhoto, !clip.isAdded, !type.roles.isEmpty {
+            roleRow(type)
         }
     }
 
@@ -287,8 +262,7 @@ struct ReviewView: View {
         }
     }
 
-    /// ONE TAKE's parts (1.24): what each counts as, where it is in the take, and your verdict on each. A part you
-    /// didn't do can be marked not usable, so its role stays open.
+    /// ONE TAKE's parts (1.24): what each counts as, and where it is in the take.
     private func partsSection(_ clip: Clip) -> some View {
         let parts = clip.parts ?? []
         return VStack(alignment: .leading, spacing: 12) {
@@ -321,88 +295,14 @@ struct ReviewView: View {
                             .buttonStyle(.bordered)
                         }
                     }
-                    Picker("Usable?", selection: partVerdict(part)) {
-                        Text("As the take").tag(Bool?.none)
-                        Text("Usable").tag(Bool?.some(true))
-                        Text("Not usable").tag(Bool?.some(false))
-                    }
-                    .pickerStyle(.segmented)
                 }
                 .padding(12)
                 .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
             }
             if !parts.isEmpty {
-                Text("Each part counts as a take of its shot. As the take follows what you chose above. Mark a part "
-                    + "not usable if you skipped it, and its role stays open.")
+                Text("Each part counts as a take of its own shot.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    /// One part's verdict, saved as soon as you choose.
-    private func partVerdict(_ part: ClipPart) -> Binding<Bool?> {
-        Binding(
-            get: { clip?.parts?.first(where: { $0.id == part.id })?.usable },
-            set: { store.setPartVerdict($0, partID: part.id, clipID: clipID, tripID: tripID) })
-    }
-
-    /// What the take does for coverage, with the choices as they are on screen.
-    private func coverageNote(_ clip: Clip) -> String {
-        if clip.isOneTake {
-            return usableChoice == false ? "Marked not usable: none of its parts count, unless you mark one below."
-                : "Each part counts as a take of its own shot, below."
-        }
-        var preview = clip
-        preview.usable = usableChoice
-        preview.favourite = favourite
-        if usableChoice == false {
-            return "Marked not usable, so it doesn't count."
-        }
-        if !preview.countsAsCoverage {
-            let reason = clip.checkPassed == false ? (clip.check ?? "It failed the take check") : "It stopped well short"
-            return "\(reason), so it doesn't count. Choose Use anyway if it's still good for the edit."
-        }
-        if preview.confirmedUsable {
-            if usableChoice == true && !clip.technicallyAcceptable {
-                return "Used anyway: it counts, whatever the take check said."
-            }
-            return "Confirmed usable: it counts."
-        }
-        return "Counts for now: it passed its checks. Mark it Usable once you've watched it, or star it as the best take."
-    }
-
-    /// Which scene the clip is in, with moving it, starting a new scene from it, or confirming it.
-    @ViewBuilder
-    private func sceneRow(_ clip: Clip) -> some View {
-        if let trip = store.trip(id: tripID) {
-            let scenes = trip.scenes(onDay: clip.dayNumber)
-            let number = trip.sceneNumbers(onDay: clip.dayNumber)[clip.id]
-            let current = scenes.first(where: { $0.number == number })
-            HStack {
-                Text("Scene")
-                    .font(.headline)
-                Spacer()
-                Menu {
-                    ForEach(scenes) { scene in
-                        if scene.number != number {
-                            Button("Move to \(scene.name)") {
-                                store.moveClip(clip.id, toScene: scene.number, tripID: tripID)
-                            }
-                        }
-                    }
-                    Button("Start a new scene from this clip") {
-                        store.splitScene(at: clip.id, tripID: tripID)
-                    }
-                    if clip.sceneConfirmed != true, let number {
-                        Button("Looks right") {
-                            store.moveClip(clip.id, toScene: number, tripID: tripID)
-                        }
-                    }
-                } label: {
-                    Text((current?.name ?? "None") + (clip.sceneConfirmed == true ? "" : " · suggested"))
-                        .fontWeight(.semibold)
-                }
             }
         }
     }
@@ -419,7 +319,6 @@ struct ReviewView: View {
 
     private func applyCoverageChoices(to updated: inout Clip, original: Clip) {
         updated.favourite = favourite
-        updated.usable = usableChoice
         if let roleChoice, roleChoice != original.roleID {
             updated.role = roleChoice
         }
@@ -429,80 +328,35 @@ struct ReviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Name")
                 .font(.headline)
-            TextField("Name it, like Lower Falls or Plane", text: $name)
-                .textInputAutocapitalization(.words)
-                .submitLabel(.done)
+            NameField(name: $name, suggestions: store.trip(id: tripID)?.nameSuggestions() ?? [],
+                      placeholder: "Name it, like Lower Falls or Plane")
+        }
+    }
+
+    /// For clips from another camera (1.28): what's in it, in your words, for the catalogue.
+    private var aboutSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("What's in it?")
+                .font(.headline)
+            TextField("Like sunset from the car, the heater on", text: $about, axis: .vertical)
+                .lineLimit(1...4)
                 .padding(10)
                 .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
-            if let nameNote, !name.isEmpty, name == clip?.displayName {
-                Label(nameNote, systemImage: "location.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            recentNames
         }
-    }
-
-    @ViewBuilder
-    private var recentNames: some View {
-        let names = recentNameList
-        if names.isEmpty {
-            Text("Names you use show up here, one tap to reuse.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        } else {
-            FlowLayout(spacing: 8) {
-                Text("Recent")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 7)
-                ForEach(names, id: \.self) { recent in
-                    TagChip(text: recent, isOn: recent == name.trimmingCharacters(in: .whitespaces), isSuggested: false) {
-                        name = recent
-                    }
-                }
-            }
-        }
-    }
-
-    /// Names used on this trip, most recent first.
-    private var recentNameList: [String] {
-        guard let trip = store.trip(id: tripID) else { return [] }
-        var names: [String] = []
-        for other in trip.clips.sorted(by: { $0.recordedAt > $1.recordedAt }) {
-            if let otherName = other.displayName, !names.contains(otherName) {
-                names.append(otherName)
-            }
-            if names.count == 6 {
-                break
-            }
-        }
-        return names
     }
 
     /// For clips added from Photos: which shot it is, so it sorts and counts with the rest.
-    private var shotPicker: some View {
+    private func shotPicker(_ clip: Clip) -> some View {
         HStack {
             Text("Shot type")
                 .font(.headline)
             Spacer()
-            Menu {
-                Button("Not set") { shotName = MediaImporter.shotName }
-                ForEach(Self.importChoices) { choice in
-                    Button(choice.title) { shotName = choice.rawValue }
-                }
-            } label: {
-                Text(shotLabel)
-                    .fontWeight(.semibold)
+            ShotTypeMenu(current: ShotRow.forClip(clip)) { row in
+                save()
+                store.setShot(of: row, clipID: clipID, tripID: tripID)
+                roleChoice = store.trip(id: tripID)?.clips.first { $0.id == clipID }?.roleID
             }
         }
-    }
-
-    private var shotLabel: String {
-        if shotName.isEmpty || shotName == MediaImporter.shotName {
-            return "Not set"
-        }
-        return ShotType(rawValue: shotName)?.title ?? shotName
     }
 
     private var notesSection: some View {
@@ -576,10 +430,7 @@ struct ReviewView: View {
         guard let trip = store.trip(id: tripID) else { return clip.fileName }
         var preview = clip
         preview.name = name
-        if !shotName.isEmpty {
-            preview.shot = shotName
-        }
-        if preview.displayName == clip.displayName && preview.shot == clip.shot {
+        if preview.displayName == clip.displayName {
             return clip.fileName
         }
         return store.expectedFileName(for: preview, in: trip)
@@ -592,11 +443,10 @@ struct ReviewView: View {
         loaded = true
         selected = Set(clip.tags)
         favourite = clip.favourite
-        usableChoice = clip.usable
         roleChoice = clip.roleID
         notes = clip.notes
         name = clip.name ?? ""
-        shotName = clip.shot
+        about = clip.about ?? ""
         guard clip.isOnPhone else { return }
         let url = store.clipURL(clip, in: trip)
         if clip.isPhoto {
@@ -635,13 +485,14 @@ struct ReviewView: View {
         updated.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.name = trimmedName.isEmpty ? nil : trimmedName
+        let trimmedAbout = about.trimmingCharacters(in: .whitespacesAndNewlines)
+        if original.isAdded || original.about != nil {
+            updated.about = trimmedAbout.isEmpty ? nil : trimmedAbout
+        }
         if updated != original {
             store.updateClip(updated, in: tripID)
         }
-        if !shotName.isEmpty && shotName != original.shot {
-            // Renames the file as well.
-            store.setShot(shotName, clipID: clipID, tripID: tripID)
-        } else if updated.displayName != original.displayName {
+        if updated.displayName != original.displayName {
             store.applyFileName(clipID: clipID, tripID: tripID)
         }
     }

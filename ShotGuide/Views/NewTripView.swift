@@ -14,6 +14,9 @@ struct NewTripView: View {
     @State private var continent = ""
     @State private var countryCode = ""
     @State private var state = ""
+    /// The city or town (1.28), filled in from where you are.
+    @State private var town = ""
+    @State private var townEdited = false
     @State private var suggestedPlace = ""
     @State private var status = "Finding your location…"
     @State private var lookedUp = false
@@ -23,22 +26,18 @@ struct NewTripView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Place") {
-                    TextField("Place name, e.g. Mount Barney", text: $place)
+                Section {
+                    TextField("Like Rocky Mountains Day Trip", text: $place)
                         .textInputAutocapitalization(.words)
                     if place.isEmpty && !suggestedPlace.isEmpty {
                         Button("Use “\(suggestedPlace)”") {
                             place = suggestedPlace
                         }
                     }
-                }
-
-                Section {
-                    TripTypeList(selection: $tripType)
                 } header: {
-                    Text("Trip type")
+                    Text("Trip")
                 } footer: {
-                    Text("Tunes the shot list and the tips. Staying longer? Add days as you go, from the trip page.")
+                    Text("What the trip is. You name each shot yourself as you film it.")
                 }
 
                 Section {
@@ -68,10 +67,26 @@ struct NewTripView: View {
                         TextField("State or region", text: $state)
                             .textInputAutocapitalization(.words)
                     }
+                    TextField("City or town", text: Binding(
+                        get: { town },
+                        set: { newValue in
+                            town = newValue
+                            townEdited = true
+                        }))
+                        .textInputAutocapitalization(.words)
                 } header: {
                     Text("Where")
                 } footer: {
-                    Text(status)
+                    Text(status + " A day somewhere new gets its own town.")
+                }
+
+                Section {
+                    TripTypeList(selection: $tripType)
+                } header: {
+                    Text("Trip type")
+                } footer: {
+                    Text("Tunes which shots each part of the day lists, and their tips. Staying longer? Add days as you go, "
+                        + "from the trip page.")
                 }
 
                 Section {
@@ -86,7 +101,7 @@ struct NewTripView: View {
                 } header: {
                     Text("File names")
                 } footer: {
-                    Text("Clips will be named like \(previewName), ending with the name you give each clip.")
+                    Text("Clips will be named like \(previewName), ending with the name you give each one.")
                 }
 
                 if let errorText {
@@ -147,7 +162,7 @@ struct NewTripView: View {
     private var previewName: String {
         let code = fileCode.isEmpty ? "Trip" : TripStore.fileCode(for: fileCode)
         return TripStore.clipName(code: code, day: TripStore.dayString(Date(), timeZone: .current), shotName: ShotType.wide.rawValue,
-                                  take: 1, name: "Lower Falls", fileExtension: "mov")
+                                  take: 1, name: "Bear Lake", fileExtension: "mov")
     }
 
     private func lookUp(_ found: CLLocation) {
@@ -166,7 +181,10 @@ struct NewTripView: View {
                     // Set the state after the country, which clears it when it changes.
                     DispatchQueue.main.async { state = area }
                 }
-                suggestedPlace = mark.areasOfInterest?.first ?? mark.locality ?? mark.name ?? ""
+                suggestedPlace = mark.areasOfInterest?.first ?? ""
+                if !townEdited, town.isEmpty, let locality = mark.locality ?? mark.subAdministrativeArea {
+                    town = locality
+                }
                 status = "Filled in from your location. Change anything that's wrong."
             }
         }
@@ -181,6 +199,7 @@ struct NewTripView: View {
                 state: state.trimmingCharacters(in: .whitespaces),
                 countryCode: countryCode,
                 continent: continent,
+                town: town,
                 latitude: coordinate?.latitude,
                 longitude: coordinate?.longitude,
                 type: tripType)

@@ -84,7 +84,7 @@ final class TripStore: ObservableObject {
 
     @discardableResult
     func createTrip(place: String, fileCode: String, state: String, countryCode: String, continent: String,
-                    latitude: Double?, longitude: Double?, type: TripType) throws -> Trip {
+                    town: String, latitude: Double?, longitude: Double?, type: TripType) throws -> Trip {
         let now = Date()
         let country = countryCode.isEmpty ? "" : GeoData.countryName(countryCode)
         let day = Self.dayString(now, timeZone: .current)
@@ -114,6 +114,8 @@ final class TripStore: ObservableObject {
             longitude: longitude,
             createdAt: now,
             folderPath: relative)
+        let townName = town.trimmingCharacters(in: .whitespacesAndNewlines)
+        trip.town = townName.isEmpty ? nil : townName
         trip.days = [TripDay(number: 1, startedAt: now, place: place, fileCode: code, type: type,
                              latitude: latitude, longitude: longitude)]
         try write(trip)
@@ -176,10 +178,11 @@ final class TripStore: ObservableObject {
 
     // MARK: Days
 
-    /// Starts the next day: at the same place as the day before, or at a new one (`place`), with its own type.
-    /// Returns the new day's number.
+    /// Starts the next day: at the same place as the day before, or at a new one (`place`, in `town`), with its own
+    /// type. Returns the new day's number.
     @discardableResult
-    func addDay(tripID: UUID, place: String?, type: TripType, latitude: Double?, longitude: Double?) -> Int? {
+    func addDay(tripID: UUID, place: String?, town: String? = nil, type: TripType, latitude: Double?,
+                longitude: Double?) -> Int? {
         guard var trip = self.trip(id: tripID) else { return nil }
         var days = trip.allDays
         guard let last = days.last else { return nil }
@@ -190,13 +193,55 @@ final class TripStore: ObservableObject {
             day = TripDay(number: number, startedAt: Date(), place: last.place, fileCode: last.fileCode, type: type,
                           latitude: latitude ?? last.latitude, longitude: longitude ?? last.longitude)
         } else {
+            let newTown = (town ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             day = TripDay(number: number, startedAt: Date(), place: newPlace, fileCode: Self.fileCode(for: newPlace), type: type,
-                          latitude: latitude, longitude: longitude)
+                          latitude: latitude, longitude: longitude, town: newTown.isEmpty ? nil : newTown)
         }
         days.append(day)
         trip.days = days
         replace(trip)
         return number
+    }
+
+    /// Changes the city or town (1.28): a day that moved somewhere new has its own, every other day shares the trip's.
+    func setTown(_ town: String, day number: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        let trimmed = town.trimmingCharacters(in: .whitespacesAndNewlines)
+        var days = trip.allDays
+        if let index = days.firstIndex(where: { $0.number == number }), days[index].town != nil {
+            days[index].town = trimmed.isEmpty ? nil : trimmed
+            trip.days = days
+        } else {
+            trip.town = trimmed.isEmpty ? nil : trimmed
+        }
+        replace(trip)
+    }
+
+    /// Swipes a row away for a day, or puts it back (1.28). A row swiped away stops counting until it's filmed.
+    func setNotToday(_ key: String, away: Bool, day number: Int, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        var days = trip.allDays
+        guard let index = days.firstIndex(where: { $0.number == number }) else { return }
+        var keys = days[index].notToday ?? []
+        keys.removeAll { $0 == key }
+        if away {
+            keys.append(key)
+        }
+        days[index].notToday = keys.isEmpty ? nil : keys
+        trip.days = days
+        replace(trip)
+    }
+
+    /// Saves the script for TALK or VOICEOVER (1.28).
+    func setScript(_ text: String, for shot: ShotType, tripID: UUID) {
+        guard var trip = self.trip(id: tripID) else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if shot == .voiceover {
+            trip.voiceoverScript = trimmed.isEmpty ? nil : trimmed
+        } else {
+            trip.talkScript = trimmed.isEmpty ? nil : trimmed
+        }
+        replace(trip)
     }
 
     func setType(_ type: TripType, day number: Int, tripID: UUID) {
@@ -287,18 +332,45 @@ final class TripStore: ObservableObject {
         replace(trip)
     }
 
-    /// Gives a clip added from Photos a shot type, like TIMELAPSE, so it sorts and counts with the rest.
-    func setShot(_ shotName: String, clipID: UUID, tripID: UUID) {
-        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }),
-              trip.clips[index].shot != shotName else { return }
-        let day = trip.clips[index].dayNumber
-        let others = trip.clips.filter { $0.shot == shotName && $0.dayNumber == day && $0.id != clipID }
-        trip.clips[index].shot = shotName
-        trip.clips[index].take = (others.map { $0.take }.max() ?? 0) + 1
-        // A role belongs to the shot it was filmed for.
-        trip.clips[index].role = nil
+    /// Gives a clip added from Photos a shot type, like TIMELAPSE, the role it's for, like ON THE WAY's window, and
+    /// the half or version, like HOME's After (1.28), so it sorts and counts with the rest.
+    func setShot(_ shotName: String, role: String? = nil, variant: String? = nil, clipID: UUID, tripID: UUID) {
+        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }) else { return }
+        let changesShot = trip.clips[index].shot != shotName
+        guard changesShot || trip.clips[index].role != role || trip.clips[index].variant != variant else { return }
+        if changesShot {
+            let day = trip.clips[index].dayNumber
+            let others = trip.clips.filter { $0.shot == shotName && $0.dayNumber == day && $0.id != clipID }
+            trip.clips[index].shot = shotName
+            trip.clips[index].take = (others.map { $0.take }.max() ?? 0) + 1
+        }
+        // A role and a version belong to the shot they were filmed for.
+        trip.clips[index].role = role
+        trip.clips[index].variant = variant
+        replace(trip)
+        if changesShot {
+            applyFileName(clipID: clipID, tripID: tripID)
+        }
+    }
+
+    /// Names a clip, or takes its name off, and renames its files to match (1.28).
+    func setName(_ name: String?, clipID: UUID, tripID: UUID) {
+        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }) else { return }
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let wanted: String? = trimmed.isEmpty ? nil : trimmed
+        guard trip.clips[index].displayName != wanted else { return }
+        trip.clips[index].name = wanted
         replace(trip)
         applyFileName(clipID: clipID, tripID: tripID)
+    }
+
+    /// Adds tags to a clip, keeping the ones it has, in the library's order.
+    func addTags(_ tags: [String], clipID: UUID, tripID: UUID) {
+        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }) else { return }
+        let new = tags.filter { !trip.clips[index].tags.contains($0) }
+        guard !new.isEmpty else { return }
+        trip.clips[index].tags += new
+        replace(trip)
     }
 
     /// `wanted`, or wanted-2, wanted-3… if a file of that name is already in the folder.
@@ -333,101 +405,9 @@ final class TripStore: ObservableObject {
         return "About \(minutes) min of 4K space left"
     }
 
-    // MARK: Scenes
-
-    /// The scene for a clip being saved now, using (then clearing) your choice for the next clip if you made one.
-    /// Also whether it starts a new place, and the place's name: the one you gave New place, or the name of the
-    /// place it joins (1.21).
-    func sceneForNewClip(tripID: UUID, day: Int, latitude: Double?, longitude: Double?,
-                         at date: Date) -> (scene: Int, confirmed: Bool, isNew: Bool, placeName: String?) {
-        guard var trip = self.trip(id: tripID) else { return (1, false, true, nil) }
-        let result = trip.sceneForNewClip(day: day, latitude: latitude, longitude: longitude, at: date)
-        let existing = trip.scenes(onDay: day).first { $0.number == result.scene }
-        let chosen = trip.nextScene?.day == day ? trip.nextScene?.name : nil
-        if trip.nextScene?.day == day {
-            trip.nextScene = nil
-            replace(trip)
-        }
-        if let existing {
-            return (result.scene, result.confirmed, false, existing.placeName)
-        }
-        return (result.scene, result.confirmed, true, chosen)
-    }
-
-    /// Your choice for the next clip on a day: true starts a new scene, false keeps it in the last one, nil leaves
-    /// it to the app's suggestion. A new place can have a name, which its clips get.
-    func setNextScene(_ startsNew: Bool?, day: Int, tripID: UUID, name: String? = nil) {
-        guard var trip = self.trip(id: tripID) else { return }
-        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let placeName = (trimmed?.isEmpty ?? true) ? nil : trimmed
-        trip.nextScene = startsNew.map { SceneChoice(day: day, startsNew: $0, name: $0 ? placeName : nil) }
-        replace(trip)
-    }
-
-    /// Names or renames a place: its clips without a name, or with its old name, get this one, and their files are
-    /// renamed to match (on the SSD, the next time the trip is copied). Clips with names of their own keep them.
-    func namePlace(_ scene: Int, day: Int, name: String, tripID: UUID) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, var trip = self.trip(id: tripID) else { return }
-        let named = trip.namePlace(scene, onDay: day, name: trimmed)
-        replace(trip)
-        for clipID in named {
-            applyFileName(clipID: clipID, tripID: tripID)
-        }
-    }
-
-    func mergeScene(_ scene: Int, day: Int, tripID: UUID) {
-        guard var trip = self.trip(id: tripID) else { return }
-        trip.mergeScene(scene, onDay: day)
-        replace(trip)
-    }
-
-    func splitScene(at clipID: UUID, tripID: UUID) {
-        guard var trip = self.trip(id: tripID) else { return }
-        trip.splitScene(at: clipID)
-        replace(trip)
-    }
-
-    func moveClip(_ clipID: UUID, toScene scene: Int, tripID: UUID) {
-        guard var trip = self.trip(id: tripID) else { return }
-        trip.moveClip(clipID, toScene: scene)
-        replace(trip)
-    }
-
-    func confirmScene(_ scene: Int, day: Int, tripID: UUID) {
-        guard var trip = self.trip(id: tripID) else { return }
-        trip.confirmScene(scene, onDay: day)
-        replace(trip)
-    }
-
     func addClip(_ clip: Clip, to tripID: UUID) {
         guard var trip = self.trip(id: tripID) else { return }
         trip.clips.append(clip)
-        // Shots skipped on the Next row come back after your next take (1.24).
-        if trip.skippedNext?.day == clip.dayNumber {
-            trip.skippedNext = nil
-        }
-        replace(trip)
-    }
-
-    /// Skips a shot on a day's Next row (1.24): the next one comes forward, and this one is back after your next take.
-    func skipNext(_ key: String, day: Int, tripID: UUID) {
-        guard var trip = self.trip(id: tripID) else { return }
-        var skipped = (trip.skippedNext?.day == day ? trip.skippedNext : nil) ?? SkippedNext(day: day, keys: [])
-        if !skipped.keys.contains(key) {
-            skipped.keys.append(key)
-        }
-        // Everything skipped: start again from the top.
-        let left = trip.nextSuggestions(day: day).filter { !skipped.keys.contains($0.skipKey) }
-        trip.skippedNext = left.isEmpty ? nil : skipped
-        replace(trip)
-    }
-
-    /// Your verdict on one part of a ONE TAKE (1.24): Usable, Not usable, or nil for not checked.
-    func setPartVerdict(_ usable: Bool?, partID: UUID, clipID: UUID, tripID: UUID) {
-        guard var trip = self.trip(id: tripID), let index = trip.clips.firstIndex(where: { $0.id == clipID }),
-              let partIndex = trip.clips[index].parts?.firstIndex(where: { $0.id == partID }) else { return }
-        trip.clips[index].parts?[partIndex].usable = usable
         replace(trip)
     }
 
@@ -781,7 +761,10 @@ final class TripStore: ObservableObject {
         // Creative coverage (1.19), added at the end so the columns before keep their places.
         "role", "role_name", "purpose", "scene", "scene_name", "scene_status", "planned_s", "usable", "coverage",
         // ONE TAKE (1.24): a row for each part, with the same file, and where the part starts and ends in it.
-        "part_of", "part", "part_start_s", "part_end_s"
+        "part_of", "part", "part_start_s", "part_end_s",
+        // 1.28: the city or town, and what's in a clip added from another camera, in your words. Since 1.28 the scene
+        // columns are spots worked out from where and when the clips were filmed.
+        "town", "about"
     ]
 
     /// costs.csv (1.27): every cost on the trip with its place, day, when you added it, kind, amount, currency, the
@@ -811,7 +794,8 @@ final class TripStore: ObservableObject {
         let coverage = trip.coverageByClip()
         for clip in trip.clips.sorted(by: { $0.recordedAt < $1.recordedAt }) {
             let info = coverage[clip.id] ?? ClipCoverageInfo()
-            lines.append((catalogRow(clip, trip: trip, coverage: info) + ["", "", "", ""])
+            let tail = [trip.town(onDay: clip.dayNumber) ?? "", clip.about ?? ""]
+            lines.append((catalogRow(clip, trip: trip, coverage: info) + ["", "", "", ""] + tail)
                 .map { csvField($0) }.joined(separator: ","))
             // A ONE TAKE: then each part, as the take of its shot it counts as, in the same file.
             for part in clip.parts ?? [] {
@@ -819,7 +803,7 @@ final class TripStore: ObservableObject {
                 partInfo.status = coverage[part.id]?.status
                 let partColumns = [clip.shot + " " + String(clip.take), part.title, String(format: "%.1f", part.start),
                                    String(format: "%.1f", part.end)]
-                lines.append((catalogRow(clip.partTake(part), trip: trip, coverage: partInfo) + partColumns)
+                lines.append((catalogRow(clip.partTake(part), trip: trip, coverage: partInfo) + partColumns + tail)
                     .map { csvField($0) }.joined(separator: ","))
             }
         }
@@ -887,7 +871,7 @@ final class TripStore: ObservableObject {
             role?.purpose ?? "",
             coverage.scene.map { String($0) } ?? "",
             coverage.sceneName ?? "",
-            coverage.scene == nil ? "" : (clip.sceneConfirmed == true ? "confirmed" : "suggested"),
+            coverage.scene == nil ? "" : "geotag",
             clip.plannedLength.map { String(format: "%.1f", $0) } ?? "",
             clip.usable.map { $0 ? "yes" : "no" } ?? "",
             coverage.status?.rawValue ?? ""

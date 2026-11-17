@@ -51,108 +51,6 @@ struct FlowLayout: Layout {
     }
 }
 
-/// A small one-line chip for a creative role, or a part of a scene's story: green once it's covered, plain while
-/// it's still to film, outlined when it's optional, a swap-in or no longer needed, and with an orange warning when
-/// the last take for it didn't count.
-///
-/// Built from an image and a text rather than a `Label`: inside a list, a `Label` in a `FlowLayout` squeezed its
-/// words out and left tall empty pills (1.19).
-struct CoverageChip: View {
-    enum Look {
-        /// Covered by a take you've confirmed.
-        case confirmed
-        /// Covered by a take that counts for now.
-        case covered
-        /// A part of a scene's story that one of its clips already fills.
-        case done
-        /// Not covered yet: the last take for it didn't count.
-        case retake
-        /// Still to film.
-        case toFilm
-        /// Optional, like WIDE's vertical hero.
-        case optional
-        /// A swap-in for a usual role the place can't give.
-        case swapIn
-        /// Not needed any more: the shot is already covered, or the scene is behind you.
-        case spare
-    }
-
-    let text: String
-    let look: Look
-
-    var body: some View {
-        HStack(spacing: 4) {
-            if let symbol {
-                Image(systemName: symbol)
-                    .foregroundStyle(look == .retake ? Color.orange : textColour)
-            }
-            Text(text)
-                .lineLimit(1)
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(textColour)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(fill, in: Capsule())
-        .overlay {
-            if isOutlined {
-                Capsule()
-                    .strokeBorder(Color.secondary.opacity(0.5), lineWidth: 1)
-            }
-        }
-        .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(text + ", " + stateWords)
-    }
-
-    private var symbol: String? {
-        switch look {
-        case .confirmed: return "checkmark.circle.fill"
-        case .covered: return "checkmark.circle"
-        case .done: return "checkmark"
-        case .retake: return "exclamationmark.triangle.fill"
-        case .optional: return "plus"
-        case .swapIn: return "arrow.triangle.swap"
-        case .toFilm, .spare: return nil
-        }
-    }
-
-    private var isCovered: Bool {
-        look == .confirmed || look == .covered || look == .done
-    }
-
-    private var isOutlined: Bool {
-        look == .optional || look == .swapIn || look == .spare
-    }
-
-    private var textColour: Color {
-        if isCovered {
-            return .green
-        }
-        return isOutlined ? .secondary : Color.primary.opacity(0.85)
-    }
-
-    private var fill: Color {
-        if isCovered {
-            return Color.green.opacity(0.16)
-        }
-        return isOutlined ? .clear : Color.primary.opacity(0.1)
-    }
-
-    private var stateWords: String {
-        switch look {
-        case .confirmed: return "confirmed usable"
-        case .covered: return "counts for now"
-        case .done: return "covered"
-        case .retake: return "the last take didn't count"
-        case .toFilm: return "to film"
-        case .optional: return "optional"
-        case .swapIn: return "swap-in"
-        case .spare: return "not needed"
-        }
-    }
-}
-
 struct TagChip: View {
     let text: String
     let isOn: Bool
@@ -282,5 +180,106 @@ struct FilmingTag: View {
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(filming.colour)
+    }
+}
+
+/// A name box with the names you've used on this trip and its town, one tap to reuse (1.28).
+struct NameField: View {
+    @Binding var name: String
+    let suggestions: [String]
+    var placeholder = "Name it, like Bear Lake"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField(placeholder, text: $name)
+                .textInputAutocapitalization(.words)
+                .submitLabel(.done)
+                .padding(10)
+                .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+            if suggestions.isEmpty {
+                Text("Names you use show up here, one tap to reuse.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                FlowLayout(spacing: 8) {
+                    ForEach(suggestions, id: \.self) { suggestion in
+                        TagChip(text: suggestion, isOn: suggestion == name.trimmingCharacters(in: .whitespaces),
+                                isSuggested: false) {
+                            name = suggestion
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+extension Trip {
+    /// Names to offer for a clip (1.28): the ones used on this trip, latest first, then its towns.
+    func nameSuggestions(limit: Int = 6) -> [String] {
+        var names: [String] = []
+        for clip in clips.sorted(by: { $0.recordedAt > $1.recordedAt }) {
+            if let name = clip.displayName, !names.contains(name) {
+                names.append(name)
+            }
+            if names.count == limit {
+                break
+            }
+        }
+        for day in allDays {
+            if let town = town(onDay: day.number), !names.contains(town), names.count < limit + 1 {
+                names.append(town)
+            }
+        }
+        return names
+    }
+}
+
+/// Picks which shot a clip added from Photos is (1.28), from the rows on the lists, part by part.
+struct ShotTypeMenu: View {
+    let current: ShotRow?
+    let choose: (ShotRow?) -> Void
+
+    /// Every row a clip from another camera could be: not WHIP's halves, ONE TAKE or MATCH CUT, which need the camera,
+    /// or VOICEOVER, which is sound.
+    static func choices(in part: TripPhase) -> [ShotRow] {
+        part.allRows.filter { row in
+            row.shot != .whip && row.shot != .oneTake && row.shot != .matchCut && row.shot != .voiceover
+        }
+    }
+
+    var body: some View {
+        Menu {
+            Button("Not set") { choose(nil) }
+            ForEach(TripPhase.allCases) { part in
+                let rows = Self.choices(in: part)
+                if !rows.isEmpty {
+                    Section(part.title) {
+                        ForEach(rows) { row in
+                            Button(row.title) { choose(row) }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(current?.title ?? "Not set")
+                    .fontWeight(.semibold)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption)
+            }
+        }
+    }
+}
+
+extension TripStore {
+    /// Gives a clip added from Photos the shot of a row, or takes it off again (1.28).
+    func setShot(of row: ShotRow?, clipID: UUID, tripID: UUID) {
+        guard let row else {
+            setShot(MediaImporter.shotName, role: nil, variant: nil, clipID: clipID, tripID: tripID)
+            return
+        }
+        let variant = row.fixedVariant.flatMap { row.shot.variants.indices.contains($0) ? row.shot.variants[$0] : nil }
+        setShot(row.shot.rawValue, role: row.role, variant: variant, clipID: clipID, tripID: tripID)
     }
 }

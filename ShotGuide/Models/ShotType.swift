@@ -51,7 +51,7 @@ enum Filming {
 }
 
 /// What the phone is on for a shot.
-enum Mount: Equatable {
+enum Mount: Hashable {
     case tripod
     /// For smooth moving shots.
     case gimbal
@@ -208,11 +208,6 @@ struct ShotPlan {
         facesAwayOnTripod && shot != .dance && shot != .home
     }
 
-    /// The screen dims from when you press record until the take ends, as nobody's looking at it (1.24).
-    var dimsScreen: Bool {
-        facesAwayOnTripod
-    }
-
     var captureConfig: CaptureConfig {
         CaptureConfig(lens: lens, fps: fps, stabilisation: stabilisation, timelapseInterval: timelapseInterval,
                       exposureBias: exposureBias, playsMusic: shot == .dance, speaksPrompts: signalsDuringTake,
@@ -345,6 +340,24 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
     /// WHIP comes in two halves: Out ends a place, In starts the next.
     var isTransition: Bool { self == .whip }
 
+    /// The creative shots (1.28): in a drop-down of their own, there whenever you want one, and never counted towards a
+    /// day, so skipping them never leaves it looking unfinished.
+    var isCreative: Bool {
+        switch self {
+        case .oneTake, .matchCut, .clone, .orbit, .dance, .silhouette, .hyperlapse: return true
+        default: return false
+        }
+    }
+
+    /// Filmed at home, before or after the trip rather than on the day (1.28): HOME, TALK from a script and VOICEOVER.
+    /// TALK's one line at the spot is a creative shot, but it's still TALK, so it doesn't count either.
+    var isAtHome: Bool {
+        switch self {
+        case .home, .talk, .voiceover: return true
+        default: return false
+        }
+    }
+
     /// Often filmed inside, where the room's lights set the colour, so golden and blue hour leave them on automatic.
     var oftenIndoors: Bool { self == .food || self == .home || self == .stay }
 
@@ -378,13 +391,14 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         }
     }
 
-    /// WIDE and SLOMO can be filmed in your hand or with you in them.
-    var canToggleInShot: Bool { self == .wide || self == .slomo }
+    /// Whether the camera offers "I'm in this shot". Never since 1.28: each row on the lists is filmed one way, and WIDE's
+    /// and SLOMO's roles say whether you're in them.
+    var canToggleInShot: Bool { false }
 
     var variants: [String] {
         switch self {
         case .reveal: return ["Auto zoom", "Walk reveal", "Tilt up"]
-        case .talk: return ["Tripod", "Walking"]
+        case .talk: return ["At home", "One line"]
         case .reaction: return ["1x", "0.5x"]
         case .matchCut: return MatchMove.allCases.map { $0.title }
         case .whip: return ["Out", "In"]
@@ -399,7 +413,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .wide, .tele, .slomo, .ambient, .timelapse, .moment, .walkaway, .matchCut, .clone, .silhouette, .dance, .oneTake:
             return .steadyAndLevel
         case .talk:
-            return variantName == "Walking" ? .none : .steadyAndLevel
+            // At home it's on the tripod; one line at the spot is in your hand (1.28). "Walking" is from before 1.28.
+            return variantName == "One line" || variantName == "Walking" ? .none : .steadyAndLevel
         case .reveal:
             return variantName == "Auto zoom" ? .steadyAndLevel : .none
         case .detail, .food, .reflection, .sounds, .wildlife, .home, .bRoll:
@@ -429,7 +444,7 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .food: return "Local food, close and slow"
         case .detail: return "Four different close-ups"
         case .pov: return "What your eyes see on the way"
-        case .talk: return "Talking to camera, on the tripod or walking"
+        case .talk: return "Your script, read to camera at home"
         case .ambient: return "30 seconds of pure sound"
         case .slomo: return "Water, waves or a jump in slow motion"
         case .whip: return "Whip pan from one place to the next"
@@ -483,7 +498,8 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
         case .reveal:
             return plan.variantName == variants.first ? .tripod : .gimbal
         case .talk:
-            return plan.variantName == "Walking" ? .gimbal : .tripod
+            // TALK at home goes on the tripod; one line at the spot is in your hand (1.28).
+            return plan.variantName == "One line" || plan.variantName == "Walking" ? .handheld : .tripod
         case .wide, .slomo:
             return plan.isInShot ? .tripod : .handheld
         case .timelapse, .walkaway, .tele, .moment, .matchCut, .clone, .silhouette, .dance, .home, .oneTake:
@@ -539,9 +555,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return "Only your arm: it reaches into the bottom of the frame, holding their hand. They're a step ahead, in the middle."
         case .talk:
             return firstHalf
-                ? "Head and shoulders, a little off centre, with your eyes on the top third line and the view behind you."
-                : "Arm's length, a little above eye level, with your face in the top half of the frame and the trail or "
-                    + "the view behind you."
+                ? "Head and shoulders in the middle of the upright frame, your eyes on the top third line, close enough to "
+                    + "read the script under the lens."
+                : "Arm's length, a little above eye level, with your face in the top half of the frame and the place behind you."
         case .slomo:
             return plan.isInShot ? "In the middle of the frame where the action is: mid-jump, at the water's edge or under the spray." : nil
         case .matchCut:
@@ -621,9 +637,9 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
             return ["Lie back in the grass and film your boots with the view beyond them.",
                     "Bend your knees and walk heel to toe to keep it smooth."]
         case .talk:
-            return ["Say one specific thing: a fact, a feeling or a tip.",
-                    "Smile first and leave a beat at the end. It gives the edit room.",
-                    "Walking: go slower than feels natural, and keep the phone a little above your eyes."]
+            return ["Smile first and leave a beat at the end. It gives the edit room.",
+                    "Read it through once out loud before you film, so it sounds like you talking, not reading.",
+                    "A window to one side of you gives the softest light."]
         case .ambient:
             return ["Turn your body to block the wind.",
                     "No talking or footsteps: the sound is the point."]
@@ -926,17 +942,70 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
                 ])
 
         case .onTheWay:
-            return ShotPlan(
-                shot: self, take: take, group: .inHand,
-                lens: .wide, fps: 30, stabilisation: .strongest,
-                autoStop: 10,
-                before: "The trip there: a plane window, the road ahead, a boat's wake, your bag going on. "
-                    + "At a window, hold the phone close to the glass to cut reflections.",
-                steps: [
-                    GuideStep(start: 0, end: 2, text: "Frame it and hold steady."),
-                    GuideStep(start: 2, end: 8, text: "Let the movement do the work. Keep the phone still."),
-                    GuideStep(start: 8, end: 10, text: "Hold.")
-                ])
+            // Four kinds since 1.28: the start of it, out the window, the road ahead and pulling in.
+            switch roleID {
+            case "getting-going":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .strongest,
+                    autoStop: 10,
+                    before: "The start of it: bags going in the boot, the walk through the airport, boarding, the first "
+                        + "coffee. Hold steady and let it happen in front of you.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Frame it and hold steady."),
+                        GuideStep(start: 2, end: 8, text: "Let it happen. Keep the phone still."),
+                        GuideStep(start: 8, end: 10, text: "Hold.")
+                    ],
+                    filming: .portrait)
+            case "window":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .ultraWide, fps: 30, stabilisation: .strongest,
+                    autoStop: 10,
+                    before: "The lens right up to the glass, so there's no reflection. The shady side's best, and wipe the "
+                        + "window first.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Lens to the glass. Hold steady."),
+                        GuideStep(start: 2, end: 8, text: "Let the world slide past. Keep the phone still."),
+                        GuideStep(start: 8, end: 10, text: "Hold.")
+                    ])
+            case "road-ahead":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .strongest,
+                    autoStop: 15,
+                    before: "Where you're heading: the road through the windscreen, the track ahead, the water over the bow. "
+                        + "Low on the dash or against the glass. Never while you're the one driving.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Frame the way ahead and hold steady."),
+                        GuideStep(start: 2, end: 13, text: "Let the road come to you. Keep the phone still."),
+                        GuideStep(start: 13, end: 15, text: "Hold.")
+                    ])
+            case "pulling-in":
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .strongest,
+                    autoStop: 10,
+                    before: "Arriving: the welcome sign, the car park, the trailhead, the first sight of the place as you "
+                        + "pull in.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Frame it and hold steady."),
+                        GuideStep(start: 2, end: 8, text: "Let it come into view. Keep the phone still."),
+                        GuideStep(start: 8, end: 10, text: "Hold.")
+                    ])
+            default:
+                return ShotPlan(
+                    shot: self, take: take, group: .inHand,
+                    lens: .wide, fps: 30, stabilisation: .strongest,
+                    autoStop: 10,
+                    before: "The trip there: a plane window, the road ahead, a boat's wake, your bag going on. "
+                        + "At a window, hold the phone close to the glass to cut reflections.",
+                    steps: [
+                        GuideStep(start: 0, end: 2, text: "Frame it and hold steady."),
+                        GuideStep(start: 2, end: 8, text: "Let the movement do the work. Keep the phone still."),
+                        GuideStep(start: 8, end: 10, text: "Hold.")
+                    ])
+            }
 
         case .food:
             return ShotPlan(
@@ -1050,29 +1119,30 @@ enum ShotType: String, CaseIterable, Codable, Identifiable {
 
         case .talk:
             if variantIndex == 1 {
+                // One line at the spot (1.28): the hook, filmed where you are.
                 return ShotPlan(
                     shot: self, take: take, group: .inShot,
                     lens: .front, fps: 30, stabilisation: .strongest,
-                    autoStop: nil, manualLength: 30, countdown: 3,
-                    before: "Front camera, on the gimbal or at arm's length, mic clipped on. Walk slowly and talk to the "
-                        + "lens like you're telling a friend about this place. Do three takes.",
+                    autoStop: 8, countdown: 3,
+                    before: "Front camera at arm's length, a little above your eyes, with the place behind you. One line, "
+                        + "like \u{201C}Nobody told me Colorado looked like this.\u{201D} Do it two or three times.",
                     steps: [
-                        GuideStep(start: 0, end: 2, text: "Start walking. Eyes on the lens."),
-                        GuideStep(start: 2, end: 25, text: "Say where you are and why it's worth coming."),
-                        GuideStep(start: 25, end: nil, text: "Slow down, hold a beat, then stop.")
+                        GuideStep(start: 0, end: 2, text: "Look at the lens."),
+                        GuideStep(start: 2, end: 7, text: "Say your line."),
+                        GuideStep(start: 7, end: 8, text: "Hold a beat.")
                     ],
                     variantName: variantName)
             }
-            // The front camera, like Walking, so you can see yourself (1.24).
+            // At home, from a script (1.28): the front camera, so the script can scroll just under the lens.
             return ShotPlan(
                 shot: self, take: take, group: .inShot,
                 lens: .front, fps: 30, stabilisation: .off,
-                autoStop: nil, manualLength: 20, countdown: 5,
-                before: "Front camera on the tripod at eye level, so you can see yourself, mic clipped on. Do three takes.",
+                autoStop: nil, manualLength: 60, countdown: 5,
+                before: "At home, on the tripod at eye level by a window, front camera, mic clipped on. Your script scrolls "
+                    + "just under the lens, so you read it while looking at the camera. Do two or three takes.",
                 steps: [
                     GuideStep(start: 0, end: 2, text: "Look at the lens and smile."),
-                    GuideStep(start: 2, end: 15, text: "Say one thing about this place."),
-                    GuideStep(start: 15, end: nil, text: "Hold a beat, then stop.")
+                    GuideStep(start: 2, end: nil, text: "Read your script, a little slower than feels natural. Stop when you're done.")
                 ],
                 variantName: variantName)
 

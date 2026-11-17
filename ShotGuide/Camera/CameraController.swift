@@ -237,7 +237,7 @@ final class CameraController: NSObject, ObservableObject {
         if config.playsMusic {
             Self.prepareMusicAudioSession()
         } else if config.speaksPrompts {
-            Self.preparePromptAudioSession()
+            Self.preparePromptAudioSession(front: config.lens == .front)
         }
 
         var hasMic = false
@@ -852,6 +852,10 @@ final class CameraController: NSObject, ObservableObject {
         let interval = mainConfig?.timelapseInterval
         let used: PhoneHold = mainConfig?.lens == .front ? .upright : hold
         activeSideways = used.isSideways
+        if mainConfig?.speaksPrompts == true {
+            // The app set the sound up for the voice in your ear, so it sets stereo's left and right too (1.28).
+            Self.setStereoOrientation(for: used)
+        }
         startProblem = nil
         saveProblem = nil
         rolling = false
@@ -1030,7 +1034,7 @@ final class CameraController: NSObject, ObservableObject {
     /// The shots you're in on the tripod (1.24): the voice plays to AirPods in full quality, or nowhere without them, and
     /// the clip records from a mic you've plugged in, or else the phone's own. AirPods only ever play this way, so their
     /// mic is never the one recording.
-    static func preparePromptAudioSession() {
+    static func preparePromptAudioSession(front: Bool) {
         let audio = AVAudioSession.sharedInstance()
         try? audio.setCategory(.playAndRecord, mode: .videoRecording, options: [.allowBluetoothA2DP, .defaultToSpeaker])
         try? audio.setActive(true)
@@ -1038,7 +1042,36 @@ final class CameraController: NSObject, ObservableObject {
         let plugged = inputs.first { $0.portType == .usbAudio || $0.portType == .headsetMic }
         if let input = plugged ?? inputs.first(where: { $0.portType == .builtInMic }) {
             try? audio.setPreferredInput(input)
+            if input.portType == .builtInMic {
+                prepareStereo(input, front: front)
+            }
         }
+    }
+
+    /// The phone's own mics in stereo, on the side the camera faces (1.28). When the app sets the sound up itself (for
+    /// the voice in your ear), the camera's stereo setting isn't enough on its own: the mics have to be asked for stereo
+    /// too, or the clip comes out in mono, as the 1.27 test's tripod shots did. A phone without stereo mics is left as it is.
+    static func prepareStereo(_ input: AVAudioSessionPortDescription, front: Bool) {
+        let stereo = (input.dataSources ?? []).filter { $0.supportedPolarPatterns?.contains(.stereo) == true }
+        let side: AVAudioSession.Orientation = front ? .front : .back
+        guard let source = stereo.first(where: { $0.orientation == side }) ?? stereo.first else { return }
+        try? source.setPreferredPolarPattern(.stereo)
+        try? input.setPreferredDataSource(source)
+    }
+
+    /// Left and right the way the clip is filmed (1.28): set as each take starts, never during it. The connector's side
+    /// decides it, so a phone turned with its top to the left has the connector on the right.
+    static func setStereoOrientation(for hold: PhoneHold) {
+        let audio = AVAudioSession.sharedInstance()
+        guard audio.currentRoute.inputs.contains(where: { $0.portType == .builtInMic }) else { return }
+        let orientation: AVAudioSession.StereoOrientation
+        switch hold {
+        case .upright: orientation = .portrait
+        case .upsideDown: orientation = .portraitUpsideDown
+        case .sidewaysLeft: orientation = .landscapeRight
+        case .sidewaysRight: orientation = .landscapeLeft
+        }
+        try? audio.setPreferredInputOrientation(orientation)
     }
 
     static func locationMetadata(latitude: Double?, longitude: Double?) -> [AVMetadataItem] {

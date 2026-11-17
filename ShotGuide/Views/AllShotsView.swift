@@ -358,12 +358,13 @@ extension TripPhase {
     /// Where you'll be for this part of the day, for the All shots page.
     var guidePlace: String {
         switch self {
-        case .onTheWay: return "At home, then on the road there"
+        case .onTheWay: return "On the way there: the car, the plane, the train or the boat"
         case .arriving: return "Walking in: the trail, the boardwalk or the street"
         case .firstLook: return "Where the view first opens up"
         case .atTheSpot: return "At the view: the lookout, the summit, the beach or the falls"
         case .bRoll: return "All around the place, whenever you've a spare minute"
-        case .leaving: return "Heading off, then where you're staying, and home"
+        case .leaving: return "Heading off, then where you're staying"
+        case .atHome: return "At home, before you go and after you're back"
         }
     }
 }
@@ -437,8 +438,8 @@ extension ShotType {
             return "Water and motion slowed right down: spray off the falls, a wave breaking over rocks, a jump into a "
                 + "waterhole, sand kicked up on the beach, snow thrown into the air, or a hair flick in bright sun."
         case .talk:
-            return "You talking to the camera with the view behind you: at a lookout, sitting on a summit rock, at the "
-                + "water's edge, or walking a trail or a street with the phone just above your eyes."
+            return "You talking to the camera about the trip, filmed at home from a script made from your place facts. Or "
+                + "one quick line at the spot, with the place behind you."
         case .walkaway:
             return "You walking away from the camera into the scene: up a trail, along a ridge, down the waterline, across "
                 + "a rock shelf towards the falls, or down a quiet lane. A path leading into the view does half the work."

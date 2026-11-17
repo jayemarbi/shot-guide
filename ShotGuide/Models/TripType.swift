@@ -69,9 +69,13 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         tuning(for: shot)?.target ?? shot.targetTakes
     }
 
-    /// Core (everyday), full day or extra, for this type of trip.
+    /// Core (everyday), full day or extra, for this type of trip. The creative shots, and everything filmed at home,
+    /// never count towards a day, whatever the type (1.28): they're there when you want them.
     func tier(for shot: ShotType) -> ShotTier {
-        tuning(for: shot)?.tier ?? shot.tier
+        if shot.isCreative || shot.isAtHome {
+            return .extra
+        }
+        return tuning(for: shot)?.tier ?? shot.tier
     }
 
     /// Whether the shot counts towards a day at all (core or full day).
@@ -201,7 +205,7 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .wide: ShotTuning(target: 4, summary: "The whole falls, top to pool, and upright for the vertical hero",
                           alsoCounts: ["vertical-hero"]),
         .slomo: ShotTuning(target: 2, tier: .core, summary: "Water hitting the pool, spray or a jump in: film it in the sun",
-                           lightDay: 1),
+                           lightDay: 1, alsoCounts: ["you"]),
         .talk: ShotTuning(summary: "The walk in: how long, how hard, and whether you can swim"),
         .walkaway: ShotTuning(target: 1, summary: "You walking towards the falls along the track or the rocks"),
         .tele: ShotTuning(summary: "You, small, at the foot of the falls"),
@@ -236,7 +240,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .reveal: ShotTuning(summary: "The beach opening up below you, or tilt up from the water"),
         .oneTake: ShotTuning(summary: "One long take on the sand, the sea in front and room to walk out"),
         .wide: ShotTuning(summary: "The whole bay and the coastline"),
-        .slomo: ShotTuning(target: 2, tier: .core, summary: "Waves breaking, a splash, a run into the water", lightDay: 1),
+        .slomo: ShotTuning(target: 2, tier: .core, summary: "Waves breaking, a splash, a run into the water", lightDay: 1,
+                           alsoCounts: ["you"]),
         .talk: ShotTuning(summary: "The beach: getting there, the swim, the best time to come"),
         .walkaway: ShotTuning(summary: "You walking along the waterline"),
         .tele: ShotTuning(summary: "You, small, at the water's edge"),
@@ -345,7 +350,8 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
         .reveal: ShotTuning(summary: "The white valley opening up"),
         .oneTake: ShotTuning(summary: "One long take on a flat snowfield with room to walk out"),
         .wide: ShotTuning(summary: "The snowfield and the peaks"),
-        .slomo: ShotTuning(target: 2, tier: .core, summary: "Snow being thrown, kicked or falling", lightDay: 1),
+        .slomo: ShotTuning(target: 2, tier: .core, summary: "Snow being thrown, kicked or falling", lightDay: 1,
+                           alsoCounts: ["you"]),
         .talk: ShotTuning(summary: "The snow: getting there, what to wear, the best runs or walks"),
         .walkaway: ShotTuning(summary: "You walking away through fresh snow, leaving footprints"),
         .tele: ShotTuning(tier: .core, summary: "You, small and dark against the white"),
@@ -378,6 +384,11 @@ struct TripDay: Codable, Hashable, Identifiable {
     var type: TripType
     var latitude: Double?
     var longitude: Double?
+    /// The city or town, for a day that moved somewhere new (1.28). nil is the trip's.
+    var town: String? = nil
+    /// The rows you swiped away for the day, as the place doesn't have them (1.28): `ShotRow.key`s. They stop counting
+    /// until they're filmed or put back.
+    var notToday: [String]? = nil
 
     var id: Int { number }
 

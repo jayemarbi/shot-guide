@@ -47,11 +47,18 @@ final class LogRecorder: NSObject {
     private var stopCompletion: ((URL?, String?) -> Void)?
     /// The mic's sound format, seen as its sound arrives, for when the camera has no suggestion.
     private var audioFormat: CMAudioFormatDescription?
-    /// Sound waiting to go into the movie, oldest first (1.27.1). Steadying the picture holds frames back by up to a
-    /// second and a half, so a take's first frame was filmed before recording began: the last few seconds of sound are
-    /// kept all the time, so the clip's sound starts with its first frame. Until 1.27.1 it started a second or so late.
-    /// Kept across takes, so `clear` leaves it.
+    /// Sound waiting to go into the movie, oldest first (1.27.1). The last few seconds are kept all the time, each a copy
+    /// of its own (1.28): holding on to the mic's own buffers starved it, and the sound came in late. Kept across takes,
+    /// so `clear` leaves it.
     private var pendingAudio: [CMSampleBuffer] = []
+    /// When record was pressed, on the camera's clock (1.28). Steadying the picture holds frames back by up to a second
+    /// and a half, so the first frames to arrive after the press were filmed before it, while the phone was still
+    /// moving into place. The take starts with the first frame filmed at or after the press, so its sound starts with
+    /// it too. `pressedAt` puts a limit on the wait.
+    private var pressTime: CMTime = .invalid
+    private var pressedAt: Date? = nil
+    /// The longest wait for a frame filmed after the press, before the next frame is taken anyway.
+    private static let pressWait: TimeInterval = 2.5
     /// How much sound is kept from before a take.
     private static let audioKept = CMTime(seconds: 3, preferredTimescale: 600)
     /// The most sound that waits for a writer that's fallen behind, about 12 seconds.
@@ -80,11 +87,15 @@ final class LogRecorder: NSObject {
     /// once it's in the file, with how many seconds ago that frame was filmed, so the take's clock can match the clip;
     /// `onFailed` with what went wrong, and whether the take had started.
     func start(_ take: Take, onStarted: @escaping (Double) -> Void, onFailed: @escaping (String, Bool) -> Void) {
+        // The moment of the press, before anything waits in the queue.
+        let pressed = CMClockGetTime(take.clock)
         queue.async {
             self.clear()
             self.takeNumber += 1
             let number = self.takeNumber
             self.take = take
+            self.pressTime = pressed
+            self.pressedAt = Date()
             self.onStarted = onStarted
             self.onFailed = onFailed
             // No picture from the camera: say so, rather than wait for ever.
@@ -160,6 +171,8 @@ final class LogRecorder: NSObject {
         onFailed = nil
         stopTime = .invalid
         stopCompletion = nil
+        pressTime = .invalid
+        pressedAt = nil
     }
 
     private func fail(_ problem: String) {
@@ -199,6 +212,12 @@ final class LogRecorder: NSObject {
             return
         }
         if writer == nil {
+            // A frame filmed before record was pressed, held back by the steadying: left out, so the clip starts at
+            // the press, with its sound (1.28). Never for more than a couple of seconds.
+            if pressTime.isValid, CMTimeCompare(time, pressTime) < 0,
+               let pressedAt, Date().timeIntervalSince(pressedAt) < Self.pressWait {
+                return
+            }
             guard let pixels = CMSampleBufferGetImageBuffer(sample) else { return }
             do {
                 try begin(take, width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels), at: time)
@@ -233,13 +252,34 @@ final class LogRecorder: NSObject {
         if let format = CMSampleBufferGetFormatDescription(sample) {
             audioFormat = format
         }
-        pendingAudio.append(sample)
+        // A copy, so the mic gets its own buffer straight back (1.28).
+        pendingAudio.append(Self.ownCopy(of: sample) ?? sample)
         if started, !failed, audioInput != nil, sessionStart.isValid {
             drainAudio()
         } else {
             // Not recording: only the last few seconds are kept, for the start of the next take.
             forgetOldAudio()
         }
+    }
+
+    /// A copy of a piece of the mic's sound with its own memory, with the same format and timing. nil if it can't be
+    /// copied, and then the original is kept instead.
+    static func ownCopy(of sample: CMSampleBuffer) -> CMSampleBuffer? {
+        guard let data = CMSampleBufferGetDataBuffer(sample),
+              let format = CMSampleBufferGetFormatDescription(sample) else { return nil }
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateContiguous(allocator: kCFAllocatorDefault, sourceBuffer: data,
+                                            blockAllocator: kCFAllocatorDefault, customBlockSource: nil,
+                                            offsetToData: 0, dataLength: 0, flags: kCMBlockBufferAlwaysCopyDataFlag,
+                                            blockBufferOut: &block) == kCMBlockBufferNoErr,
+              let block else { return nil }
+        var copy: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+            allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
+            sampleCount: CMSampleBufferGetNumSamples(sample),
+            presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sample),
+            packetDescriptions: nil, sampleBufferOut: &copy) == noErr else { return nil }
+        return copy
     }
 
     /// Lets go of the sound from more than a few seconds ago.

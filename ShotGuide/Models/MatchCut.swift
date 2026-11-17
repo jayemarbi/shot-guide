@@ -68,13 +68,27 @@ enum MatchMove: Int, CaseIterable, Identifiable {
         allCases.first { $0.title == title }
     }
 
-    /// How many places you've filmed this move at, across every trip: each place on each day counts once.
+    /// How many places you've filmed this move at, across every trip: each spot on each day counts once (1.28: spots
+    /// are worked out from where each clip was filmed).
     func places(in trips: [Trip]) -> Int {
         var seen = Set<String>()
         for trip in trips {
-            for take in trip.allTakes where take.shot == ShotType.matchCut.rawValue && take.variant == title
-                && take.countsAsCoverage {
-                seen.insert("\(trip.id.uuidString)-\(take.dayNumber)-\(take.scene.map { String($0) } ?? "day")")
+            let takes = trip.allTakes.filter {
+                $0.shot == ShotType.matchCut.rawValue && $0.variant == title && $0.countsAsCoverage
+            }
+            guard !takes.isEmpty else { continue }
+            var spotOf: [UUID: Int] = [:]
+            for day in Set(takes.map { $0.dayNumber }) {
+                for spot in trip.spots(onDay: day) {
+                    for clip in spot.clips {
+                        spotOf[clip.id] = spot.number
+                    }
+                }
+            }
+            for take in takes {
+                // A ONE TAKE's part is in its clip's spot.
+                let spot = spotOf[take.partOf ?? take.id] ?? spotOf[take.id]
+                seen.insert("\(trip.id.uuidString)-\(take.dayNumber)-\(spot.map { String($0) } ?? "day")")
             }
         }
         return seen.count

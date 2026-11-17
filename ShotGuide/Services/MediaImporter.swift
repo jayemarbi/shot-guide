@@ -49,11 +49,11 @@ enum MediaImporter {
         return copy
     }
 
-    /// Returns how many items were added.
+    /// Returns the clips added, in the order they were picked, to step through and say what's in each (1.28).
     @MainActor
     static func importItems(_ items: [PhotosPickerItem], tripID: UUID, day: Int, store: TripStore,
-                            status: @escaping (String) -> Void) async -> Int {
-        var added = 0
+                            status: @escaping (String) -> Void) async -> [UUID] {
+        var added: [UUID] = []
         for (index, item) in items.enumerated() {
             status("Adding \(index + 1) of \(items.count) from Photos…")
             let isMovie = item.supportedContentTypes.contains { $0.conforms(to: .movie) }
@@ -66,8 +66,8 @@ enum MediaImporter {
                 }
                 guard let source else { continue }
                 defer { try? FileManager.default.removeItem(at: source) }
-                if try await add(source, isMovie: isMovie, tripID: tripID, day: day, store: store) {
-                    added += 1
+                if let id = try await add(source, isMovie: isMovie, tripID: tripID, day: day, store: store) {
+                    added.append(id)
                 }
             } catch {
                 // Skip anything that couldn't be read and carry on with the rest.
@@ -77,8 +77,8 @@ enum MediaImporter {
     }
 
     @MainActor
-    private static func add(_ source: URL, isMovie: Bool, tripID: UUID, day: Int, store: TripStore) async throws -> Bool {
-        guard let trip = store.trip(id: tripID) else { return false }
+    private static func add(_ source: URL, isMovie: Bool, tripID: UUID, day: Int, store: TripStore) async throws -> UUID? {
+        guard let trip = store.trip(id: tripID) else { return nil }
         let info = isMovie ? await movieInfo(source) : imageInfo(source)
         let date = info.date ?? trip.createdAt
         let latitude = info.latitude ?? trip.latitude
@@ -86,7 +86,7 @@ enum MediaImporter {
         let take = store.nextTake(tripID: tripID, shotName: shotName, day: day)
         let fileExtension = source.pathExtension.isEmpty ? (isMovie ? "mov" : "jpg") : source.pathExtension.lowercased()
         guard let destination = store.newClipURL(tripID: tripID, shotName: shotName, take: take, date: date, day: day,
-                                                 fileExtension: fileExtension) else { return false }
+                                                 fileExtension: fileExtension) else { return nil }
         try FileManager.default.copyItem(at: source, to: destination)
         // No hidden extras from Photos, which would follow it to the SSD as a "._" file (1.25).
         TripStore.stripExtendedAttributes(destination)
@@ -116,7 +116,7 @@ enum MediaImporter {
             notes: "",
             day: day)
         store.addClip(clip, to: tripID)
-        return true
+        return clip.id
     }
 
     // MARK: Reading when and where it was taken

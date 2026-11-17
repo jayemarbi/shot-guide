@@ -55,6 +55,8 @@ struct StartDaySheet: View {
 
     @State private var somewhereNew = false
     @State private var place = ""
+    /// The city or town somewhere new is in (1.28), filled in from where you are.
+    @State private var town = ""
     @State private var suggestedPlace = ""
     @State private var type: TripType = .general
     @State private var loaded = false
@@ -107,18 +109,20 @@ struct StartDaySheet: View {
                 checkRow("Somewhere new", on: somewhereNew)
             }
             if somewhereNew {
-                TextField("Place name, e.g. Surfers Paradise", text: $place)
+                TextField("Place name, like Garden of the Gods", text: $place)
                     .textInputAutocapitalization(.words)
                 if place.isEmpty && !suggestedPlace.isEmpty {
                     Button("Use “\(suggestedPlace)”") {
                         place = suggestedPlace
                     }
                 }
+                TextField("City or town", text: $town)
+                    .textInputAutocapitalization(.words)
             }
         } header: {
             Text("Where are you today?")
         } footer: {
-            Text("A new place gets its own name in the file names. Its clips stay in this trip's folder.")
+            Text("A new place gets its own name in the file names, and its own town. Its clips stay in this trip's folder.")
         }
     }
 
@@ -145,9 +149,13 @@ struct StartDaySheet: View {
         CLGeocoder().reverseGeocodeLocation(current) { placemarks, _ in
             let mark = placemarks?.first
             let found = mark?.areasOfInterest?.first ?? mark?.locality ?? mark?.name ?? ""
+            let locality = mark?.locality ?? mark?.subAdministrativeArea ?? ""
             DispatchQueue.main.async {
                 if found != currentPlace {
                     suggestedPlace = found
+                }
+                if town.isEmpty {
+                    town = locality
                 }
             }
         }
@@ -156,7 +164,7 @@ struct StartDaySheet: View {
     private func start() {
         let coordinate = location.location?.coordinate
         let newPlace: String? = somewhereNew ? place : nil
-        if let number = store.addDay(tripID: tripID, place: newPlace, type: type,
+        if let number = store.addDay(tripID: tripID, place: newPlace, town: somewhereNew ? town : nil, type: type,
                                      latitude: coordinate?.latitude, longitude: coordinate?.longitude) {
             onStarted(number)
         }

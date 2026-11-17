@@ -29,32 +29,6 @@ final class VoicePrompts {
     }
 }
 
-/// Dims the screen while a shot you're in records on the tripod (1.24): nobody's looking at it, and a bright screen in
-/// the sun adds a lot of heat. It dims when you press record and comes back up when the take ends, so setting up stays
-/// bright.
-enum ScreenDimmer {
-    private static var saved: CGFloat? = nil
-
-    @MainActor
-    static func dim() {
-        guard saved == nil, let screen = currentScreen else { return }
-        saved = screen.brightness
-        screen.brightness = min(screen.brightness, 0.05)
-    }
-
-    @MainActor
-    static func restore() {
-        guard let value = saved else { return }
-        saved = nil
-        currentScreen?.brightness = value
-    }
-
-    @MainActor
-    private static var currentScreen: UIScreen? {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen
-    }
-}
-
 /// Runs the signals while you film a shot you're in on the tripod, when you can't see the screen (1.24). Five
 /// flashes, one a second, lead into each new step, the same as the countdown; a fast flicker at the end means you're
 /// done and can walk back. With headphones in, a voice says what's next as the flashes start. It also runs ONE TAKE's
