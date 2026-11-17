@@ -46,7 +46,7 @@ struct QuickReviewSheet: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .tint(favourite ? .yellow : .secondary)
+                        .tint(favourite ? Color.yellow : Color.secondary)
                         Button(role: .destructive) {
                             confirmDelete = true
                         } label: {

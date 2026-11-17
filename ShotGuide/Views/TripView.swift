@@ -264,14 +264,17 @@ struct TripView: View {
         return [place, line].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    /// "Everyday 13 of 22 · Full day 13 of 30", from the same takes. Light day is still there for a short day.
+    /// "Everyday 13 of 22 · Full day 13 of 25", from the same takes, with a tick for a light day once it's done.
     private func coverageLine(_ trip: Trip, day: Int) -> some View {
         let coverage = trip.dayCoverage(day)
-        let levels: [CoverageLevel] = coverage.complete(.everyday) ? [.everyday, .full] : [.light, .everyday, .full]
-        let parts = levels.map { level -> String in
+        var parts: [String] = []
+        if coverage.target(.light) > 0 && coverage.complete(.light) && !coverage.complete(.everyday) {
+            parts.append("Light day ✓")
+        }
+        for level in [CoverageLevel.everyday, .full] {
             let done = coverage.done(level)
             let target = coverage.target(level)
-            return "\(level.title) \(done) of \(target)" + (target > 0 && done >= target ? " ✓" : "")
+            parts.append("\(level.title) \(done) of \(target)" + (target > 0 && done >= target ? " ✓" : ""))
         }
         return Text(parts.joined(separator: " · "))
             .foregroundStyle(.secondary)
@@ -427,7 +430,7 @@ struct TripView: View {
         if filmed > 0 {
             return .filmed(filmed)
         }
-        return row.shot == .home ? .progress(done: 0, target: 1) : nil
+        return row.shot == .home ? RowStatus.progress(done: 0, target: 1) : nil
     }
 
     private static let factsHint = "Distance, time, costs, your rating and tips, for scripts, guides and on-screen text"

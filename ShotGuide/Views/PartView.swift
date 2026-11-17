@@ -144,7 +144,7 @@ struct PartView: View {
     @ViewBuilder
     private func creativeRow(_ row: ShotRow, trip: Trip) -> some View {
         let filmed = trip.takes(of: row, day: day).count
-        let label = ShotRowLabel(title: row.title, line: row.line, status: filmed > 0 ? .filmed(filmed) : nil,
+        let label = ShotRowLabel(title: row.title, line: row.line, status: filmed > 0 ? RowStatus.filmed(filmed) : nil,
                                  mount: row.mount.title)
         if row.shot == .matchCut {
             // Pick the move first: the camera sticks to it, so every place lines up.
